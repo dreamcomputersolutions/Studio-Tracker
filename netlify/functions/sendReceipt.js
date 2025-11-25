@@ -14,19 +14,40 @@ exports.handler = async function(event, context) {
     to: data.email,
   };
 
-  // --- LOGIC: CHECK EMAIL TYPE ---
   if (data.type === 'READY_NOTIFY') {
-    mailOptions.subject = `Good News! Job ${data.jobId} is Ready`;
+    // --- 1. READY TO COLLECT ---
+    mailOptions.subject = `Job ${data.jobId} is Ready! - Studio Click`;
     mailOptions.html = `
-      <h2>Hello ${data.name},</h2>
-      <p>Your photo job <strong>${data.jobId}</strong> is ready for collection!</p>
-      <p>Please bring your receipt when you come to collect.</p>
-      <br/><p>Studio Click Team</p>
+      <div style="font-family: sans-serif; padding: 20px;">
+        <h2>Hello ${data.name},</h2>
+        <p>Your job <strong>${data.jobId}</strong> is completed and ready for collection.</p>
+        <p>Please visit the studio to pick up your items.</p>
+        <br/>
+        <p>Regards,<br/>Studio Click Team</p>
+      </div>
     `;
+  } else if (data.type === 'JOB_UPDATED') {
+    // --- 2. INITIAL / UPDATED RECEIPT ---
+    mailOptions.subject = `Job Confirmation: #${data.jobId} - Studio Click`;
+    mailOptions.html = `
+      <div style="font-family: sans-serif; padding: 20px;">
+        <h2>Job Confirmed</h2>
+        <p>Hi ${data.name},</p>
+        <p>Thank you for your order. Your job <strong>${data.jobId}</strong> has been processed.</p>
+        <p>Please find your receipt attached below.</p>
+        <br/>
+        <p>Regards,<br/>Studio Click Team</p>
+      </div>
+    `;
+    mailOptions.attachments = [{
+      filename: `Receipt-${data.jobId}.pdf`,
+      content: data.pdfBase64,
+      encoding: 'base64'
+    }];
   } else {
-    // Standard Receipt (Default)
+    // --- 3. GENERIC / FINAL ---
     mailOptions.subject = `Receipt for Job #${data.jobId}`;
-    mailOptions.html = `<h2>Receipt Attached</h2><p>Thank you for your business.</p>`;
+    mailOptions.html = `<h2>Receipt Attached</h2><p>Thank you!</p>`;
     mailOptions.attachments = [{
       filename: `Receipt-${data.jobId}.pdf`,
       content: data.pdfBase64,
