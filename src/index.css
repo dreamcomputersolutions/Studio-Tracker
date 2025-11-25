@@ -1,58 +1,123 @@
 :root {
-  --primary: #4F46E5; /* Studio Indigo */
-  --bg: #F3F4F6;
-  --card-bg: #FFFFFF;
-  --text-main: #111827;
-  --text-light: #6B7280;
+  --primary: #2563eb; /* Royal Blue */
+  --bg: #f1f5f9;
+  --white: #ffffff;
+  --text: #1e293b;
+  --gray: #64748b;
 }
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'Segoe UI', sans-serif;
   background-color: var(--bg);
-  color: var(--text-main);
+  color: var(--text);
   margin: 0;
-  display: flex;
-  justify-content: center;
-  min-height: 100vh;
   padding: 40px 20px;
 }
 
-/* Common Card Style */
-.container, form, .job-card {
-  background: var(--card-bg);
-  padding: 2rem;
+/* Layout Containers */
+.container {
+  max-width: 600px;
+  margin: 0 auto;
+  background: var(--white);
+  padding: 30px;
   border-radius: 12px;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  max-width: 500px;
-  width: 100%;
-  margin: 0 auto;
 }
 
 h2 {
   text-align: center;
   margin-top: 0;
-  color: var(--text-main);
+  margin-bottom: 30px;
+  color: #0f172a;
 }
 
-/* Inputs */
+/* --- JOB CARD STYLING --- */
+.job-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  transition: transform 0.2s;
+}
+
+.job-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.job-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 5px;
+}
+
+.job-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.job-phone {
+  display: block;
+  font-size: 0.9rem;
+  color: var(--gray);
+  margin-top: 4px;
+}
+
+.job-email {
+  margin: 0 0 20px 0;
+  color: var(--gray);
+  font-size: 0.9rem;
+}
+
+/* Status Badge */
+.status-badge {
+  background: #fef3c7;
+  color: #d97706;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+/* Inputs Area */
+.job-actions {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.input-group {
+  flex: 1;
+}
+
+.input-group label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 5px;
+  color: var(--text);
+}
+
 input {
   width: 100%;
-  padding: 12px;
-  margin-bottom: 15px;
-  border: 1px solid #D1D5DB;
+  padding: 10px;
+  border: 1px solid #cbd5e1;
   border-radius: 6px;
   font-size: 1rem;
-  box-sizing: border-box; /* Important for alignment */
+  box-sizing: border-box;
 }
 
 input:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2);
+  outline: 2px solid var(--primary);
+  border-color: transparent;
 }
 
-/* Buttons */
-button {
+/* Button */
+.save-btn {
   width: 100%;
   padding: 12px;
   background-color: var(--primary);
@@ -64,34 +129,13 @@ button {
   transition: background 0.2s;
 }
 
-button:hover {
-  background-color: #4338ca;
+.save-btn:hover {
+  background-color: #1d4ed8;
 }
 
-/* Admin Specifics */
-.dashboard-container {
-  max-width: 800px; /* Wider for admin */
-}
-
-.job-card {
-  margin-bottom: 20px;
-  border-left: 5px solid var(--primary);
-}
-
-.job-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.job-details {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-/* Fix for the Admin Inputs being on one line */
-.job-details input {
-  margin-bottom: 0;
+/* Empty State */
+.empty-state {
+  text-align: center;
+  color: var(--gray);
+  font-style: italic;
 }
