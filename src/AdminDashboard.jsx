@@ -26,22 +26,34 @@ export default function AdminDashboard() {
       setProducts(snap.docs.map(d => ({...d.data(), id: d.id})));
     });
 
-    // Jobs - Removed 'orderBy' temporarily to ensure data loads even if index is missing
+    // Jobs
     const unsubJobs = onSnapshot(collection(db, "jobs"), (snap) => {
       let data = snap.docs.map(d => ({...d.data(), id: d.id}));
       
-      // Sort manually in Javascript to be safe
-      data.sort((a, b) => (b.id || "").localeCompare(a.id || ""));
+      // Sort: Newest First
+      data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
       
       setJobs(data);
 
       // Calc Stats
       let cash = 0, card = 0, due = 0;
       data.forEach(job => {
-        const paid = Number(job.advance || 0) + (job.status === "Completed" ? Number(job.balance || 0) : 0);
+        // Handle V1 and V2 Data structures
+        const total = Number(job.totalCost || job.cost || 0);
+        const adv = Number(job.advance || 0);
+        
+        let paid = adv;
+        if (job.status === "Completed") {
+          // If completed, assume full payment unless balance exists
+          paid = total; 
+        }
+
         if(job.payMethod === "Cash") cash += paid;
         if(job.payMethod === "Card") card += paid;
-        if(job.status !== "Completed") due += Number(job.balance || 0);
+        
+        // Calculate Due
+        const balance = total - paid;
+        if(job.status !== "Completed" && balance > 0) due += balance;
       });
       setStats({ totalJobs: data.length, cashIncome: cash, cardIncome: card, dueBalance: due });
     });
@@ -52,29 +64,43 @@ export default function AdminDashboard() {
   // --- 2. ACTIONS ---
   const handleNotifyCustomer = async (job) => {
     if(!confirm("Send 'Ready to Collect' email?")) return;
+    
+    // Fallback for V1 data
+    const cName = job.customerName || job.name;
+    const cEmail = job.customerEmail || job.email;
+
     try {
       await fetch('/.netlify/functions/sendReceipt', {
         method: 'POST',
         body: JSON.stringify({
           type: 'READY_NOTIFY',
-          name: job.customerName,
-          email: job.customerEmail,
+          name: cName,
+          email: cEmail,
           jobId: job.id
         })
       });
-      alert("Email Sent!");
+      alert("Notification Email Sent!");
     } catch(e) { alert("Email Failed"); console.error(e); }
   };
 
   const handleCompleteJob = async (job) => {
-    if(job.balance > 0 && !confirm(`Customer owes LKR ${job.balance}. Mark as Paid & Completed?`)) return;
+    const total = Number(job.totalCost || job.cost || 0);
+    const adv = Number(job.advance || 0);
+    const balance = total - adv;
+
+    if(balance > 0 && !confirm(`Customer owes LKR ${balance}. Mark as Paid & Completed?`)) return;
 
     // 1. Generate PDF String
     const pdfBase64 = generatePDFBase64(job);
+    
+    // Fallback variables
+    const cName = job.customerName || job.name;
+    const cEmail = job.customerEmail || job.email;
 
     // 2. Update DB
     await updateDoc(doc(db, "jobs", job.id), {
       status: "Completed",
+      balance: 0, // Mark as fully paid
       completedAt: serverTimestamp()
     });
 
@@ -84,8 +110,8 @@ export default function AdminDashboard() {
         method: 'POST',
         body: JSON.stringify({
           type: 'RECEIPT',
-          name: job.customerName,
-          email: job.customerEmail,
+          name: cName,
+          email: cEmail,
           jobId: job.id,
           pdfBase64: pdfBase64
         })
@@ -147,51 +173,60 @@ export default function AdminDashboard() {
       )}
 
       <div className="job-list-v2">
-        {jobs.length === 0 && <p style={{textAlign:'center'}}>No jobs found. Create one!</p>}
-        {jobs.map(job => (
-          <div key={job.id} className={`job-row-v2 ${job.status}`}>
-            <div className="job-date">
-              <span className="date-box">
-                {job.dueDate ? new Date(job.dueDate).getDate() : "--"} <br/>
-                <small>{job.dueDate ? new Date(job.dueDate).toLocaleString('default', { month: 'short' }) : ""}</small>
-              </span>
-            </div>
-            
-            <div className="job-info">
-              <div className="job-title">
-                <strong>{job.id}</strong> - {job.customerName}
-                {job.status === "Pending" && <span className="badge-pending">Processing</span>}
-                {job.status === "Completed" && <span className="badge-completed">Done</span>}
-              </div>
-              <div className="job-product">
-                {job.productName} ({job.productCode})
-              </div>
-              <div className="job-finance">
-                Total: {job.totalCost} | Paid: {job.advance} | 
-                <span style={{color: job.balance > 0 ? 'red' : 'green', fontWeight:'bold', marginLeft:'5px'}}>
-                  Due: {job.balance}
+        {jobs.length === 0 && <p style={{textAlign:'center'}}>No jobs found.</p>}
+        {jobs.map(job => {
+          // DATA MAPPING (Handle Old vs New)
+          const name = job.customerName || job.name || "Unknown";
+          const product = job.productName || job.sizes || "Custom Service";
+          const total = job.totalCost || job.cost || 0;
+          const paid = job.advance || 0;
+          const due = (job.status === "Completed") ? 0 : (total - paid);
+
+          return (
+            <div key={job.id} className={`job-row-v2 ${job.status}`}>
+              <div className="job-date">
+                <span className="date-box">
+                  {job.dueDate ? new Date(job.dueDate).getDate() : "--"} <br/>
+                  <small>{job.dueDate ? new Date(job.dueDate).toLocaleString('default', { month: 'short' }) : ""}</small>
                 </span>
               </div>
-            </div>
+              
+              <div className="job-info">
+                <div className="job-title">
+                  <strong>{job.id}</strong> - {name}
+                  {job.status === "Pending" && <span className="badge-pending">Processing</span>}
+                  {job.status === "Completed" && <span className="badge-completed">Done</span>}
+                </div>
+                <div className="job-product">
+                  {product} {job.productCode ? `(${job.productCode})` : ''}
+                </div>
+                <div className="job-finance">
+                  Total: {total} | Paid: {paid} | 
+                  <span style={{color: due > 0 ? 'red' : 'green', fontWeight:'bold', marginLeft:'5px'}}>
+                    Due: {due}
+                  </span>
+                </div>
+              </div>
 
-            <div className="job-actions-v2">
-              {job.status !== "Completed" && (
-                <>
-                  <button onClick={() => handleNotifyCustomer(job)} className="btn-icon">📧 Ready</button>
-                  {userRole === 'admin' && (
-                    <button onClick={() => handleCompleteJob(job)} className="btn-save">Finish</button>
-                  )}
-                </>
-              )}
+              <div className="job-actions-v2">
+                {job.status !== "Completed" && (
+                  <>
+                    <button onClick={() => handleNotifyCustomer(job)} className="btn-icon">📧 Ready</button>
+                    {userRole === 'admin' && (
+                      <button onClick={() => handleCompleteJob(job)} className="btn-save">Finish</button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
 }
 
-// --- SUB COMPONENTS ---
+// --- NEW JOB MODAL ---
 function NewJobModal({ products, onClose }) {
   const [formData, setFormData] = useState({
     name: '', email: '', phone: '', dueDate: '',
@@ -235,17 +270,26 @@ function NewJobModal({ products, onClose }) {
     <div className="modal-overlay">
       <div className="modal-content">
         <h2>Create New Job</h2>
-        <label>Customer Name</label>
-        <input onChange={e=>setFormData({...formData, name:e.target.value})} />
-        <label>Email</label>
-        <input type="email" onChange={e=>setFormData({...formData, email:e.target.value})} />
-        <label>Select Product</label>
-        <select onChange={e=>setFormData({...formData, productId:e.target.value})}>
-          <option value="">-- Select --</option>
-          {products.map(p => <option key={p.id} value={p.id}>{p.code} - {p.name} ({p.price})</option>)}
-        </select>
-        <label>Due Date</label>
-        <input type="date" onChange={e=>setFormData({...formData, dueDate:e.target.value})} />
+        <div style={{marginBottom:'10px'}}>
+          <label>Customer Name</label>
+          <input onChange={e=>setFormData({...formData, name:e.target.value})} placeholder="John Doe"/>
+        </div>
+        <div style={{marginBottom:'10px'}}>
+          <label>Email</label>
+          <input type="email" onChange={e=>setFormData({...formData, email:e.target.value})} placeholder="email@example.com"/>
+        </div>
+        <div style={{marginBottom:'10px'}}>
+          <label>Select Product</label>
+          <select onChange={e=>setFormData({...formData, productId:e.target.value})}>
+            <option value="">-- Select --</option>
+            {products.map(p => <option key={p.id} value={p.id}>{p.code} - {p.name} ({p.price})</option>)}
+          </select>
+        </div>
+        <div style={{marginBottom:'10px'}}>
+          <label>Due Date</label>
+          <input type="date" onChange={e=>setFormData({...formData, dueDate:e.target.value})} />
+        </div>
+        
         <label>Payment (Advance)</label>
         <div style={{display:'flex', gap:'10px'}}>
           <select onChange={e=>setFormData({...formData, payMethod:e.target.value})}>
@@ -253,9 +297,10 @@ function NewJobModal({ products, onClose }) {
           </select>
           <input type="number" placeholder="Amount Paid" onChange={e=>setFormData({...formData, advance:e.target.value})} />
         </div>
+        
         <div style={{marginTop:'20px', display:'flex', gap:'10px'}}>
           <button onClick={handleSubmit} className="btn-save">Create</button>
-          <button onClick={onClose} style={{background:'#ccc', border:'none', padding:'10px', borderRadius:'8px'}}>Cancel</button>
+          <button onClick={onClose} style={{background:'#ccc', border:'none', padding:'10px', borderRadius:'8px', cursor:'pointer'}}>Cancel</button>
         </div>
       </div>
     </div>
@@ -265,6 +310,11 @@ function NewJobModal({ products, onClose }) {
 // --- PDF GENERATOR ---
 const generatePDFBase64 = (job) => {
   const doc = new jsPDF();
+  const cName = job.customerName || job.name || "Customer";
+  const cProduct = job.productName || job.sizes || "Service";
+  const total = Number(job.totalCost || job.cost || 0);
+  const paid = Number(job.advance || 0);
+
   doc.setFontSize(20);
   doc.text(COMPANY.name, 105, 20, null, null, "center");
   doc.setFontSize(10);
@@ -278,7 +328,7 @@ const generatePDFBase64 = (job) => {
   doc.setFontSize(12);
   doc.text(`Job ID: ${job.id}`, 20, 70);
   doc.text(`Date: ${new Date().toLocaleDateString()}`, 140, 70);
-  doc.text(`Customer: ${job.customerName}`, 20, 80);
+  doc.text(`Customer: ${cName}`, 20, 80);
 
   let y = 100;
   doc.text("Description", 20, y);
@@ -286,21 +336,20 @@ const generatePDFBase64 = (job) => {
   doc.line(20, y+2, 190, y+2);
   y += 15;
   
-  doc.text(`${job.productName} (${job.productCode})`, 20, y);
-  doc.text(`${job.totalCost}.00`, 160, y);
+  doc.text(cProduct, 20, y);
+  doc.text(`${total}.00`, 160, y);
   
   y += 20;
   doc.text(`Advance Paid:`, 100, y);
-  doc.text(`${job.advance}.00`, 160, y);
+  doc.text(`${paid}.00`, 160, y);
   y += 10;
   doc.text(`Balance Paid:`, 100, y);
-  doc.text(`${job.balance}.00`, 160, y);
+  doc.text(`${total - paid}.00`, 160, y);
   
   doc.setFont(undefined, 'bold');
   y += 15;
-  doc.text("TOTAL PAID:", 100, y);
-  doc.text(`${job.totalCost}.00`, 160, y);
+  doc.text("TOTAL:", 100, y);
+  doc.text(`${total}.00`, 160, y);
 
-  doc.save(`Receipt_${job.id}.pdf`); // Auto download
-  return btoa(doc.output()); // Return for Email
+  return btoa(doc.output()); 
 };
