@@ -16,6 +16,7 @@ const COMPANY = {
 };
 
 export default function AdminDashboard() {
+  // --- STATE ---
   const [user, setUser] = useState(null);
   const [userRole, setUserRole] = useState(null); 
   const [loading, setLoading] = useState(true);
@@ -25,6 +26,7 @@ export default function AdminDashboard() {
   const [view, setView] = useState('dashboard');
   const [jobs, setJobs] = useState([]);
   const [products, setProducts] = useState([]);
+  
   const [filter, setFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -33,7 +35,7 @@ export default function AdminDashboard() {
 
   const [stats, setStats] = useState({ totalJobs: 0, cashIncome: 0, cardIncome: 0, dueBalance: 0 });
 
-  // --- AUTH ---
+  // --- 1. AUTH ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setLoading(true);
@@ -56,12 +58,14 @@ export default function AdminDashboard() {
     return unsubscribe;
   }, []);
 
-  // --- DATA ---
+  // --- 2. DATA ---
   useEffect(() => {
     if (!user) return;
+
     const unsubProd = onSnapshot(collection(db, "products"), (snap) => {
       setProducts(snap.docs.map(d => ({...d.data(), id: d.id})));
     });
+
     const unsubJobs = onSnapshot(collection(db, "jobs"), (snap) => {
       let data = snap.docs.map(d => ({...d.data(), id: d.id}));
       data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
@@ -71,25 +75,32 @@ export default function AdminDashboard() {
       data.forEach(job => {
         const total = Number(job.totalCost || 0);
         const paid = Number(job.advance || 0) + (job.status === "Completed" ? Number(job.balance || 0) : 0);
+        
         if(job.payMethod === "Cash") cash += paid;
         if(job.payMethod === "Card") card += paid;
         if(job.status !== "Completed") due += Number(job.balance || 0);
       });
       setStats({ totalJobs: data.length, cashIncome: cash, cardIncome: card, dueBalance: due });
     });
+
     return () => { unsubProd(); unsubJobs(); };
   }, [user]);
 
-  // --- HANDLERS ---
+  // --- 3. HANDLERS ---
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
     try { await signInWithEmailAndPassword(auth, loginData.email, loginData.password); } catch (error) { setLoginError("Invalid Email or Password"); }
   };
+
   const handleLogout = () => signOut(auth);
   const handleNewJob = () => { setEditingJob(null); setShowModal(true); };
   const handleEditJob = (job) => { setEditingJob(job); setShowModal(true); };
-  const handleDeleteJob = async (id) => { if(confirm("Permanently delete this job?")) await deleteDoc(doc(db, "jobs", id)); };
+
+  const handleDeleteJob = async (id) => {
+    if(confirm("Permanently delete this job?")) await deleteDoc(doc(db, "jobs", id));
+  };
 
   const handleMarkReady = async (job) => {
     if(!confirm("Mark as DONE and Notify Customer?")) return;
@@ -114,6 +125,7 @@ export default function AdminDashboard() {
     alert("Job Closed!");
   };
 
+  // --- SEARCH & FILTER ---
   const filteredJobs = jobs.filter(job => {
     const statusMatch = filter === 'all' ? true : job.status.toLowerCase() === filter;
     const term = searchTerm.toLowerCase();
@@ -129,19 +141,24 @@ export default function AdminDashboard() {
   const readyCount = jobs.filter(j => j.status === 'Ready').length;
   const completedCount = jobs.filter(j => j.status === 'Completed').length;
 
+  // --- UI ---
+
   if (loading) return <div className="login-screen">Loading...</div>;
-  if (!user) return (
-    <div className="login-screen">
-      <form className="login-box" onSubmit={handleLogin}>
-        <img src={COMPANY.logoUrl} className="logo" alt="logo"/>
-        <h2>Studio Login</h2>
-        <input className="login-input" type="email" placeholder="Email" required value={loginData.email} onChange={e=>setLoginData({...loginData, email:e.target.value})} />
-        <input className="login-input" type="password" placeholder="Password" required value={loginData.password} onChange={e=>setLoginData({...loginData, password:e.target.value})} />
-        {loginError && <p style={{color:'red', fontSize:'0.9rem'}}>{loginError}</p>}
-        <button className="btn-login">Login</button>
-      </form>
-    </div>
-  );
+
+  if (!user) {
+    return (
+      <div className="login-screen">
+        <form className="login-box" onSubmit={handleLogin}>
+          <img src={COMPANY.logoUrl} className="logo" alt="logo"/>
+          <h2>Studio Login</h2>
+          <input className="login-input" type="email" placeholder="Email" required value={loginData.email} onChange={e=>setLoginData({...loginData, email:e.target.value})} />
+          <input className="login-input" type="password" placeholder="Password" required value={loginData.password} onChange={e=>setLoginData({...loginData, password:e.target.value})} />
+          {loginError && <p style={{color:'red', fontSize:'0.9rem'}}>{loginError}</p>}
+          <button className="btn-login">Login</button>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div className="container dashboard-container">
@@ -210,7 +227,7 @@ export default function AdminDashboard() {
   );
 }
 
-// --- JOB MODAL ---
+// --- MODAL (UPDATED with 2 BUTTONS) ---
 function JobModal({ job, products, onClose }) {
   const [formData, setFormData] = useState({
     name: '', email: '', phone: '', dueDate: '',
@@ -234,7 +251,6 @@ function JobModal({ job, products, onClose }) {
     }
   }, [job, products]);
 
-  // AUTO-FILL DESCRIPTION & PRICE
   useEffect(() => {
     if (formData.productId) {
       const prod = products.find(p => p.id === formData.productId);
@@ -242,14 +258,14 @@ function JobModal({ job, products, onClose }) {
         setFormData(prev => ({
           ...prev,
           totalCost: prod.price,
-          // Only set description if it's currently empty (don't overwrite user edits)
           description: prev.description ? prev.description : (prod.description || '')
         }));
       }
     }
   }, [formData.productId]);
 
-  const handleSubmit = async () => {
+  // --- MAIN SAVE LOGIC ---
+  const saveJobLogic = async (sendEmail) => {
     if(!formData.name) return alert("Name required");
     
     const finalDueDate = formData.dueDate || new Date().toISOString().split('T')[0];
@@ -278,10 +294,11 @@ function JobModal({ job, products, onClose }) {
     let updatedJobId = job ? job.id : null;
 
     if (job) {
+      // UPDATE EXISTING
       await updateDoc(doc(db, "jobs", job.id), jobData);
       updatedJobId = job.id;
-      alert("Job Updated!");
     } else {
+      // CREATE NEW
       await runTransaction(db, async (t) => {
         const counterRef = doc(db, "counters", "jobCounter");
         const counterDoc = await t.get(counterRef);
@@ -290,11 +307,26 @@ function JobModal({ job, products, onClose }) {
         t.set(counterRef, { current: newCount });
         t.set(doc(db, "jobs", updatedJobId), { ...jobData, status: "Pending", createdAt: serverTimestamp() });
       });
-      alert("Job Created!");
     }
 
-    const pdfBase64 = await generatePDFBase64({ ...jobData, id: updatedJobId });
-    fetch('/.netlify/functions/sendReceipt', { method: 'POST', body: JSON.stringify({ type: 'JOB_UPDATED', name: formData.name, email: formData.email, jobId: updatedJobId, pdfBase64 }) });
+    // EMAIL LOGIC (Only if requested)
+    if (sendEmail) {
+      const pdfBase64 = await generatePDFBase64({ ...jobData, id: updatedJobId });
+      await fetch('/.netlify/functions/sendReceipt', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'JOB_UPDATED',
+          name: formData.name,
+          email: formData.email,
+          jobId: updatedJobId,
+          pdfBase64: pdfBase64
+        })
+      });
+      alert("Saved & Email Sent!");
+    } else {
+      alert("Saved successfully!");
+    }
+
     onClose();
   };
 
@@ -317,7 +349,18 @@ function JobModal({ job, products, onClose }) {
           <div className="form-row"><label>Payment Method</label><select value={formData.payMethod} onChange={e=>setFormData({...formData, payMethod:e.target.value})}><option>Cash</option><option>Card</option></select></div>
           <div className="form-row"><label>Advance Amount</label><input type="number" value={formData.advance} onChange={e=>setFormData({...formData, advance:e.target.value})} /></div>
         </div>
-        <div className="modal-actions"><button onClick={onClose} className="btn-cancel">Cancel</button><button onClick={handleSubmit} className="btn-confirm">{job ? "Update & Email" : "Create & Email"}</button></div>
+        
+        <div className="modal-actions">
+          {/* BUTTON 1: Save Only */}
+          <button onClick={() => saveJobLogic(false)} style={{background:'#6b7280', color:'white', border:'none', padding:'10px 20px', borderRadius:'8px', fontWeight:'600', cursor:'pointer', marginRight:'10px'}}>
+            Save Changes
+          </button>
+          
+          {/* BUTTON 2: Save & Email */}
+          <button onClick={() => saveJobLogic(true)} className="btn-confirm">
+            Save & Send Receipt
+          </button>
+        </div>
       </div>
     </div>
   );
