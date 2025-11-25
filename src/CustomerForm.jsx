@@ -12,22 +12,21 @@ export default function CustomerForm() {
 
     try {
       await runTransaction(db, async (transaction) => {
-        // 1. Read the counter
+        // 1. Get Counter
         const counterRef = doc(db, "counters", "jobCounter");
         const counterDoc = await transaction.get(counterRef);
-
+        
         let newCount = 1;
         if (counterDoc.exists()) {
           newCount = counterDoc.data().current + 1;
         }
 
-        // 2. Format ID (e.g., SC-0005)
+        // 2. Create ID
         const newId = `SC-${String(newCount).padStart(4, '0')}`;
-
-        // 3. Update Counter
+        
+        // 3. Update
         transaction.set(counterRef, { current: newCount });
-
-        // 4. Create Job with custom ID
+        
         const jobRef = doc(db, "jobs", newId);
         transaction.set(jobRef, {
           ...formData,
@@ -36,35 +35,59 @@ export default function CustomerForm() {
         });
       });
 
-      alert("Registered Successfully! Please wait for your turn.");
+      alert(`Registration Successful! Please take a seat.`);
       setFormData({ name: '', email: '', phone: '' });
     } catch (err) {
       console.error(err);
-      alert("Error registering. Please try again.");
+      alert("System Error. Please try again.");
     }
     setLoading(false);
   };
 
   return (
     <div className="container form-container">
-      <div className="brand-header center">
-        {/* UPDATED LOGO PATH */}
+      <div className="brand-header">
         <img src="/LOGO.png" alt="Studio Click" className="logo" />
-        <h2>Welcome to Studio Click</h2>
+        <h1>Welcome to Studio Click</h1>
         <p>336 Kaduwela Road, Battaramulla</p>
       </div>
 
       <form onSubmit={handleSubmit}>
-        <label>Full Name</label>
-        <input value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} required />
+        <div className="form-group">
+          <label>Full Name</label>
+          <input 
+            className="form-input"
+            value={formData.name} 
+            onChange={(e) => setFormData({...formData, name: e.target.value})} 
+            required 
+            placeholder="Enter your name"
+          />
+        </div>
         
-        <label>Email Address</label>
-        <input type="email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} required />
+        <div className="form-group">
+          <label>Email Address</label>
+          <input 
+            type="email"
+            className="form-input"
+            value={formData.email} 
+            onChange={(e) => setFormData({...formData, email: e.target.value})} 
+            required 
+            placeholder="name@example.com"
+          />
+        </div>
         
-        <label>Phone Number</label>
-        <input value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} required />
+        <div className="form-group">
+          <label>Phone Number</label>
+          <input 
+            className="form-input"
+            value={formData.phone} 
+            onChange={(e) => setFormData({...formData, phone: e.target.value})} 
+            required 
+            placeholder="077..."
+          />
+        </div>
 
-        <button type="submit" disabled={loading}>
+        <button type="submit" className="btn-submit" disabled={loading}>
           {loading ? "Registering..." : "Register for Job"}
         </button>
       </form>
