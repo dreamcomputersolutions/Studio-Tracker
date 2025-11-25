@@ -36,6 +36,11 @@ export default function AdminDashboard() {
     return unsubscribe;
   }, []);
 
+  // --- NEW: Calculate Counts for Buttons ---
+  const pendingCount = allJobs.filter(job => job.status === "Pending").length;
+  const completedCount = allJobs.filter(job => job.status === "Completed").length;
+  const totalCount = allJobs.length;
+
   const handleFinalize = async (job, sizes, cost) => {
     if(!confirm("Mark this job as completed?")) return;
 
@@ -83,15 +88,32 @@ export default function AdminDashboard() {
         <div className="stat-card highlight"><h3>Today's Income</h3><p>LKR {stats.income}</p></div>
       </div>
 
-      {/* FILTER BAR */}
+      {/* --- UPDATED FILTER BAR WITH COUNTS --- */}
       <div className="filter-bar">
-        <button className={`filter-btn ${filter==='all' ? 'active':''}`} onClick={()=>setFilter('all')}>All Jobs</button>
-        <button className={`filter-btn ${filter==='pending' ? 'active':''}`} onClick={()=>setFilter('pending')}>Pending</button>
-        <button className={`filter-btn ${filter==='completed' ? 'active':''}`} onClick={()=>setFilter('completed')}>Completed</button>
+        <button 
+          className={`filter-btn ${filter==='all' ? 'active':''}`} 
+          onClick={()=>setFilter('all')}
+        >
+          All Jobs ({totalCount})
+        </button>
+        
+        <button 
+          className={`filter-btn ${filter==='pending' ? 'active':''}`} 
+          onClick={()=>setFilter('pending')}
+        >
+          Pending ({pendingCount})
+        </button>
+        
+        <button 
+          className={`filter-btn ${filter==='completed' ? 'active':''}`} 
+          onClick={()=>setFilter('completed')}
+        >
+          Completed ({completedCount})
+        </button>
       </div>
 
       <div className="job-list">
-        {filteredJobs.length === 0 ? <p style={{textAlign:'center'}}>No jobs found.</p> : null}
+        {filteredJobs.length === 0 ? <p style={{textAlign:'center', color:'#888'}}>No jobs found in this category.</p> : null}
         
         {filteredJobs.map(job => (
           <JobItem key={job.id} job={job} onSave={handleFinalize} />
