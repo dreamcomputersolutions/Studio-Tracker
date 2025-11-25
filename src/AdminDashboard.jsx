@@ -45,19 +45,37 @@ export default function AdminDashboard() {
     setCost('');
   };
 
-  return (
-    <div style={{ padding: '20px' }}>
+ return (
+    <div className="dashboard-container">
       <h2>Studio Dashboard</h2>
+      {jobs.length === 0 && <p style={{textAlign: 'center'}}>No pending jobs.</p>}
+      
       {jobs.map(job => (
-        <div key={job.id} style={{ border: '1px solid #ccc', padding: '10px', margin: '10px 0' }}>
-          <h3>{job.name} ({job.phone})</h3>
-          <p>Email: {job.email}</p>
+        <div key={job.id} className="job-card">
+          <div className="job-header">
+            <h3>{job.name || "Unknown"}</h3>
+            <span style={{color: '#666'}}>{job.phone}</span>
+          </div>
+          <p style={{marginTop: 0, color: '#666'}}>{job.email}</p>
           
-          <input placeholder="Photo Sizes (e.g. 4x6, 10x15)" onChange={(e) => setSizes(e.target.value)} />
-          <input placeholder="Total Cost (LKR)" type="number" onChange={(e) => setCost(e.target.value)} />
+          <div className="job-details">
+            <input 
+              placeholder="Sizes (e.g. 4x6)" 
+              value={sizes}
+              onChange={(e) => setSizes(e.target.value)} 
+            />
+            <input 
+              placeholder="Cost (LKR)" 
+              type="number" 
+              value={cost}
+              onChange={(e) => setCost(e.target.value)} 
+            />
+          </div>
           
-          <button onClick={() => handleFinalize(job)} style={{ marginLeft: '10px', backgroundColor: 'green', color: 'white' }}>
-            Save & Send Email
+          <button 
+            onClick={() => handleFinalize(job)} 
+            style={{marginTop: '15px', backgroundColor: '#10B981'}}>
+            Save & Send Receipt
           </button>
         </div>
       ))}
