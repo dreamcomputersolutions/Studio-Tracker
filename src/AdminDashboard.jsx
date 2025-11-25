@@ -26,7 +26,6 @@ export default function AdminDashboard() {
   const [view, setView] = useState('dashboard');
   const [jobs, setJobs] = useState([]);
   const [products, setProducts] = useState([]);
-  
   const [filter, setFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -35,7 +34,7 @@ export default function AdminDashboard() {
 
   const [stats, setStats] = useState({ totalJobs: 0, cashIncome: 0, cardIncome: 0, dueBalance: 0 });
 
-  // --- 1. AUTH ---
+  // --- AUTH ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setLoading(true);
@@ -58,14 +57,12 @@ export default function AdminDashboard() {
     return unsubscribe;
   }, []);
 
-  // --- 2. DATA ---
+  // --- DATA ---
   useEffect(() => {
     if (!user) return;
-
     const unsubProd = onSnapshot(collection(db, "products"), (snap) => {
       setProducts(snap.docs.map(d => ({...d.data(), id: d.id})));
     });
-
     const unsubJobs = onSnapshot(collection(db, "jobs"), (snap) => {
       let data = snap.docs.map(d => ({...d.data(), id: d.id}));
       data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
@@ -82,25 +79,19 @@ export default function AdminDashboard() {
       });
       setStats({ totalJobs: data.length, cashIncome: cash, cardIncome: card, dueBalance: due });
     });
-
     return () => { unsubProd(); unsubJobs(); };
   }, [user]);
 
-  // --- 3. HANDLERS ---
-
+  // --- HANDLERS ---
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
     try { await signInWithEmailAndPassword(auth, loginData.email, loginData.password); } catch (error) { setLoginError("Invalid Email or Password"); }
   };
-
   const handleLogout = () => signOut(auth);
   const handleNewJob = () => { setEditingJob(null); setShowModal(true); };
   const handleEditJob = (job) => { setEditingJob(job); setShowModal(true); };
-
-  const handleDeleteJob = async (id) => {
-    if(confirm("Permanently delete this job?")) await deleteDoc(doc(db, "jobs", id));
-  };
+  const handleDeleteJob = async (id) => { if(confirm("Permanently delete this job?")) await deleteDoc(doc(db, "jobs", id)); };
 
   const handleMarkReady = async (job) => {
     if(!confirm("Mark as DONE and Notify Customer?")) return;
@@ -125,7 +116,6 @@ export default function AdminDashboard() {
     alert("Job Closed!");
   };
 
-  // --- SEARCH & FILTER ---
   const filteredJobs = jobs.filter(job => {
     const statusMatch = filter === 'all' ? true : job.status.toLowerCase() === filter;
     const term = searchTerm.toLowerCase();
@@ -141,24 +131,19 @@ export default function AdminDashboard() {
   const readyCount = jobs.filter(j => j.status === 'Ready').length;
   const completedCount = jobs.filter(j => j.status === 'Completed').length;
 
-  // --- UI ---
-
   if (loading) return <div className="login-screen">Loading...</div>;
-
-  if (!user) {
-    return (
-      <div className="login-screen">
-        <form className="login-box" onSubmit={handleLogin}>
-          <img src={COMPANY.logoUrl} className="logo" alt="logo"/>
-          <h2>Studio Login</h2>
-          <input className="login-input" type="email" placeholder="Email" required value={loginData.email} onChange={e=>setLoginData({...loginData, email:e.target.value})} />
-          <input className="login-input" type="password" placeholder="Password" required value={loginData.password} onChange={e=>setLoginData({...loginData, password:e.target.value})} />
-          {loginError && <p style={{color:'red', fontSize:'0.9rem'}}>{loginError}</p>}
-          <button className="btn-login">Login</button>
-        </form>
-      </div>
-    );
-  }
+  if (!user) return (
+    <div className="login-screen">
+      <form className="login-box" onSubmit={handleLogin}>
+        <img src={COMPANY.logoUrl} className="logo" alt="logo"/>
+        <h2>Studio Login</h2>
+        <input className="login-input" type="email" placeholder="Email" required value={loginData.email} onChange={e=>setLoginData({...loginData, email:e.target.value})} />
+        <input className="login-input" type="password" placeholder="Password" required value={loginData.password} onChange={e=>setLoginData({...loginData, password:e.target.value})} />
+        {loginError && <p style={{color:'red', fontSize:'0.9rem'}}>{loginError}</p>}
+        <button className="btn-login">Login</button>
+      </form>
+    </div>
+  );
 
   return (
     <div className="container dashboard-container">
@@ -227,16 +212,25 @@ export default function AdminDashboard() {
   );
 }
 
-// --- MODAL (UPDATED with 2 BUTTONS) ---
+// --- JOB MODAL (DYNAMIC PAYMENT SECTION) ---
 function JobModal({ job, products, onClose }) {
   const [formData, setFormData] = useState({
     name: '', email: '', phone: '', dueDate: '',
-    productId: '', payMethod: 'Cash', advance: '', totalCost: '', description: ''
+    productId: '', payMethod: 'Cash', advance: '', totalCost: '', description: '',
+    paymentType: 'advance' // 'unpaid', 'advance', 'full'
   });
 
   useEffect(() => {
     if (job) {
       const prod = products.find(p => p.code === job.productCode);
+      const total = Number(job.totalCost || 0);
+      const adv = Number(job.advance || 0);
+      
+      // Determine initial payment status for the UI
+      let pType = 'advance';
+      if (adv === 0) pType = 'unpaid';
+      else if (adv >= total) pType = 'full';
+
       setFormData({
         name: job.customerName || job.name || '',
         email: job.customerEmail || job.email || '',
@@ -244,13 +238,15 @@ function JobModal({ job, products, onClose }) {
         dueDate: job.dueDate || '',
         productId: prod ? prod.id : '',
         payMethod: job.payMethod || 'Cash',
-        advance: job.advance || '',
-        totalCost: job.totalCost || '',
-        description: job.description || ''
+        advance: adv,
+        totalCost: total,
+        description: job.description || '',
+        paymentType: pType
       });
     }
   }, [job, products]);
 
+  // Auto-Fill Description & Price
   useEffect(() => {
     if (formData.productId) {
       const prod = products.find(p => p.id === formData.productId);
@@ -264,7 +260,15 @@ function JobModal({ job, products, onClose }) {
     }
   }, [formData.productId]);
 
-  // --- MAIN SAVE LOGIC ---
+  // Auto-Calculate Advance based on Type
+  useEffect(() => {
+    if (formData.paymentType === 'full') {
+      setFormData(prev => ({ ...prev, advance: prev.totalCost }));
+    } else if (formData.paymentType === 'unpaid') {
+      setFormData(prev => ({ ...prev, advance: 0 }));
+    }
+  }, [formData.paymentType, formData.totalCost]);
+
   const saveJobLogic = async (sendEmail) => {
     if(!formData.name) return alert("Name required");
     
@@ -294,11 +298,9 @@ function JobModal({ job, products, onClose }) {
     let updatedJobId = job ? job.id : null;
 
     if (job) {
-      // UPDATE EXISTING
       await updateDoc(doc(db, "jobs", job.id), jobData);
       updatedJobId = job.id;
     } else {
-      // CREATE NEW
       await runTransaction(db, async (t) => {
         const counterRef = doc(db, "counters", "jobCounter");
         const counterDoc = await t.get(counterRef);
@@ -309,7 +311,6 @@ function JobModal({ job, products, onClose }) {
       });
     }
 
-    // EMAIL LOGIC (Only if requested)
     if (sendEmail) {
       const pdfBase64 = await generatePDFBase64({ ...jobData, id: updatedJobId });
       await fetch('/.netlify/functions/sendReceipt', {
@@ -326,7 +327,6 @@ function JobModal({ job, products, onClose }) {
     } else {
       alert("Saved successfully!");
     }
-
     onClose();
   };
 
@@ -345,21 +345,45 @@ function JobModal({ job, products, onClose }) {
            <div className="form-row"><label>Due Date</label><input type="date" value={formData.dueDate} onChange={e=>setFormData({...formData, dueDate:e.target.value})} /></div>
            <div className="form-row"><label>Total (LKR)</label><input type="number" value={formData.totalCost} onChange={e=>setFormData({...formData, totalCost:e.target.value})} /></div>
         </div>
-        <div className="split-row">
-          <div className="form-row"><label>Payment Method</label><select value={formData.payMethod} onChange={e=>setFormData({...formData, payMethod:e.target.value})}><option>Cash</option><option>Card</option></select></div>
-          <div className="form-row"><label>Advance Amount</label><input type="number" value={formData.advance} onChange={e=>setFormData({...formData, advance:e.target.value})} /></div>
+        
+        {/* DYNAMIC PAYMENT SECTION */}
+        <label style={{fontWeight:'bold', marginTop:'10px', display:'block'}}>Payment Details</label>
+        <div style={{background:'#f9fafb', padding:'10px', borderRadius:'8px', border:'1px solid #eee', marginBottom:'20px'}}>
+          <div className="form-row">
+            <label>Payment Status</label>
+            <select value={formData.paymentType} onChange={e=>setFormData({...formData, paymentType:e.target.value})}>
+              <option value="unpaid">Unpaid (No Payment Now)</option>
+              <option value="advance">Advance Payment</option>
+              <option value="full">Full Payment</option>
+            </select>
+          </div>
+
+          {/* Only show these if NOT Unpaid */}
+          {formData.paymentType !== 'unpaid' && (
+            <div className="split-row">
+              <div className="form-row">
+                <label>Payment Method</label>
+                <select value={formData.payMethod} onChange={e=>setFormData({...formData, payMethod:e.target.value})}>
+                  <option>Cash</option><option>Card</option>
+                </select>
+              </div>
+              <div className="form-row">
+                <label>Amount Paying Now</label>
+                <input 
+                  type="number" 
+                  value={formData.advance} 
+                  onChange={e=>setFormData({...formData, advance:e.target.value})}
+                  disabled={formData.paymentType === 'full'} // Auto-locked if full
+                  style={{background: formData.paymentType === 'full' ? '#eef' : 'white'}}
+                />
+              </div>
+            </div>
+          )}
         </div>
         
         <div className="modal-actions">
-          {/* BUTTON 1: Save Only */}
-          <button onClick={() => saveJobLogic(false)} style={{background:'#6b7280', color:'white', border:'none', padding:'10px 20px', borderRadius:'8px', fontWeight:'600', cursor:'pointer', marginRight:'10px'}}>
-            Save Changes
-          </button>
-          
-          {/* BUTTON 2: Save & Email */}
-          <button onClick={() => saveJobLogic(true)} className="btn-confirm">
-            Save & Send Receipt
-          </button>
+          <button onClick={() => saveJobLogic(false)} style={{background:'#6b7280', color:'white', border:'none', padding:'10px 20px', borderRadius:'8px', fontWeight:'600', cursor:'pointer', marginRight:'10px'}}>Save Changes</button>
+          <button onClick={() => saveJobLogic(true)} className="btn-confirm">Save & Email</button>
         </div>
       </div>
     </div>
