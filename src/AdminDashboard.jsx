@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction } from 'firebase/firestore';
-import { db } from './firebase';
+import { 
+  collection, onSnapshot, doc, updateDoc, deleteDoc, getDoc, 
+  serverTimestamp, query, runTransaction 
+} from 'firebase/firestore';
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth'; // Auth Imports
+import { db, auth } from './firebase'; // Import auth
 import { jsPDF } from "jspdf";
 import ProductManager from './ProductManager';
 
@@ -12,32 +16,58 @@ const COMPANY = {
 };
 
 export default function AdminDashboard() {
-  const [userRole, setUserRole] = useState(null); 
+  // Login State
+  const [user, setUser] = useState(null); // Firebase User
+  const [userRole, setUserRole] = useState(null); // 'admin' or 'staff'
+  const [loading, setLoading] = useState(true);
+  const [loginData, setLoginData] = useState({ email: '', password: '' });
+  const [loginError, setLoginError] = useState('');
+
+  // App State
   const [view, setView] = useState('dashboard');
   const [jobs, setJobs] = useState([]);
   const [products, setProducts] = useState([]);
   const [filter, setFilter] = useState('all');
-  
-  // Modal State
   const [showModal, setShowModal] = useState(false);
   const [editingJob, setEditingJob] = useState(null);
-
-  // Stats
   const [stats, setStats] = useState({ totalJobs: 0, cashIncome: 0, cardIncome: 0, dueBalance: 0 });
 
-  // --- 1. DATA FETCHING ---
+  // --- 1. AUTH CHECKER (Keeps you logged in) ---
   useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setLoading(true);
+      if (currentUser) {
+        // 1. User is logged in, fetch their Role from Firestore
+        const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+        if (userDoc.exists()) {
+          setUser(currentUser);
+          setUserRole(userDoc.data().role); // 'admin' or 'staff'
+        } else {
+          alert("User exists but has no role assigned in Database!");
+          await signOut(auth);
+        }
+      } else {
+        setUser(null);
+        setUserRole(null);
+      }
+      setLoading(false);
+    });
+    return unsubscribe;
+  }, []);
+
+  // --- 2. DATA FETCHING ---
+  useEffect(() => {
+    if (!user) return; // Don't fetch if not logged in
+
     const unsubProd = onSnapshot(collection(db, "products"), (snap) => {
       setProducts(snap.docs.map(d => ({...d.data(), id: d.id})));
     });
 
     const unsubJobs = onSnapshot(collection(db, "jobs"), (snap) => {
       let data = snap.docs.map(d => ({...d.data(), id: d.id}));
-      // Sort Newest First
       data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
       setJobs(data);
 
-      // Calc Stats
       let cash = 0, card = 0, due = 0;
       data.forEach(job => {
         const total = Number(job.totalCost || 0);
@@ -51,13 +81,30 @@ export default function AdminDashboard() {
     });
 
     return () => { unsubProd(); unsubJobs(); };
-  }, []);
+  }, [user]);
 
-  // --- 2. ACTIONS ---
+  // --- 3. ACTIONS ---
   
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoginError('');
+    try {
+      await signInWithEmailAndPassword(auth, loginData.email, loginData.password);
+      // onAuthStateChanged will handle the rest
+    } catch (error) {
+      console.error(error);
+      setLoginError("Incorrect Email or Password");
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
+
+  // ... (Keep existing handlers: NewJob, EditJob, DeleteJob, Notify, Complete) ...
   const handleNewJob = () => { setEditingJob(null); setShowModal(true); };
   const handleEditJob = (job) => { setEditingJob(job); setShowModal(true); };
-
+  
   const handleDeleteJob = async (id) => {
     if(confirm("Are you sure you want to DELETE this job permanently?")) {
       await deleteDoc(doc(db, "jobs", id));
@@ -78,38 +125,69 @@ export default function AdminDashboard() {
   const handleCompleteJob = async (job) => {
     if(job.balance > 0 && !confirm(`Customer owes LKR ${job.balance}. Mark as Paid & Completed?`)) return;
     
+    // Generate PDF
+    const pdfBase64 = await generatePDFBase64(job);
+
     await updateDoc(doc(db, "jobs", job.id), {
       status: "Completed",
       balance: 0, 
       completedAt: serverTimestamp()
     });
+
+    // Send Final Receipt
+    fetch('/.netlify/functions/sendReceipt', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'RECEIPT', name: job.customerName, email: job.customerEmail, jobId: job.id, pdfBase64 })
+    });
+
     alert("Job Marked as Completed!");
   };
 
-  // Filter Logic
   const filteredJobs = jobs.filter(job => {
     if (filter === 'all') return true;
     return job.status.toLowerCase() === filter;
   });
 
-  // Count Logic
   const pendingCount = jobs.filter(j => j.status === 'Pending').length;
   const completedCount = jobs.filter(j => j.status === 'Completed').length;
 
-  // --- 3. UI ---
-  if (!userRole) {
+  // --- 4. LOADING & LOGIN UI ---
+  
+  if (loading) return <div className="login-screen">Loading...</div>;
+
+  if (!user) {
     return (
       <div className="login-screen">
-        <div className="login-box">
+        <form className="login-box" onSubmit={handleLogin}>
           <img src={COMPANY.logoUrl} className="logo" alt="logo"/>
-          <h2>Studio Tracker V2.0</h2>
-          <button onClick={() => setUserRole('admin')} className="btn-admin">Admin Login</button>
-          <button onClick={() => setUserRole('staff')} className="btn-staff">Staff View</button>
-        </div>
+          <h2>Studio Tracker Login</h2>
+          
+          <input 
+            className="login-input" 
+            type="email"
+            placeholder="Email (e.g. admin@studio.com)" 
+            value={loginData.email}
+            onChange={e=>setLoginData({...loginData, email:e.target.value})}
+            required
+          />
+          <input 
+            className="login-input" 
+            type="password"
+            placeholder="Password" 
+            value={loginData.password}
+            onChange={e=>setLoginData({...loginData, password:e.target.value})}
+            required
+          />
+          
+          {loginError && <p style={{color:'red', marginBottom:'10px'}}>{loginError}</p>}
+          
+          <button type="submit" className="btn-login">Login</button>
+        </form>
       </div>
     );
   }
 
+  // --- 5. MAIN DASHBOARD UI ---
   return (
     <div className="container dashboard-container">
       <div className="header-v2">
@@ -117,7 +195,7 @@ export default function AdminDashboard() {
           <img src={COMPANY.logoUrl} className="logo-small" />
           <div>
             <h2 style={{margin:0}}>Studio Dashboard</h2>
-            <span className="badge">{userRole.toUpperCase()}</span>
+            <span className="badge">{userRole ? userRole.toUpperCase() : 'USER'}</span>
           </div>
         </div>
         <div style={{display:'flex', gap:'10px'}}>
@@ -127,7 +205,7 @@ export default function AdminDashboard() {
               <button onClick={() => setView('products')} className="btn-secondary">Products</button>
             </>
           )}
-          <button onClick={() => setUserRole(null)} className="btn-logout">Logout</button>
+          <button onClick={handleLogout} className="btn-logout">Logout</button>
         </div>
       </div>
 
@@ -152,9 +230,9 @@ export default function AdminDashboard() {
 
       {/* FILTER BAR */}
       <div className="filter-bar">
-        <button className={`filter-btn ${filter==='all'?'active':''}`} onClick={()=>setFilter('all')}>All ({jobs.length})</button>
-        <button className={`filter-btn ${filter==='pending'?'active':''}`} onClick={()=>setFilter('pending')}>Pending ({pendingCount})</button>
-        <button className={`filter-btn ${filter==='completed'?'active':''}`} onClick={()=>setFilter('completed')}>Completed ({completedCount})</button>
+        <button className={`filter-btn ${filter==='all'?'active-all':''}`} onClick={()=>setFilter('all')}>All ({jobs.length})</button>
+        <button className={`filter-btn ${filter==='pending'?'active-pending':''}`} onClick={()=>setFilter('pending')}>Pending ({pendingCount})</button>
+        <button className={`filter-btn ${filter==='completed'?'active-completed':''}`} onClick={()=>setFilter('completed')}>Completed ({completedCount})</button>
       </div>
 
       <div className="job-list-v2">
@@ -188,24 +266,22 @@ export default function AdminDashboard() {
               </div>
 
               <div className="job-actions-v2">
-                {/* ALWAYS SHOW EDIT BUTTON FOR PENDING JOBS */}
-                {job.status !== "Completed" && (
-                  <>
-                    <button onClick={() => handleEditJob(job)} className="btn-edit" style={{background:'#8b5cf6', color:'white', border:'none', padding:'8px 12px', borderRadius:'8px', cursor:'pointer', fontWeight:'600'}}>
-                      {isMissingDetails ? "Add Details" : "Edit Details"}
-                    </button>
-                    
-                    {!isMissingDetails && (
-                       <button onClick={() => handleNotifyCustomer(job)} className="btn-icon">📧 Ready</button>
-                    )}
+                {/* 1. EDIT BUTTON */}
+                <button onClick={() => handleEditJob(job)} className="btn-edit">
+                  {isMissingDetails ? "Add Details" : "Edit/Modify"}
+                </button>
+                
+                {/* 2. NOTIFY BUTTON */}
+                {!isMissingDetails && job.status !== "Completed" && (
+                   <button onClick={() => handleNotifyReady(job)} className="btn-icon">📧 Ready</button>
+                )}
 
-                    {userRole === 'admin' && (
-                      <button onClick={() => handleCompleteJob(job)} className="btn-save">Finish</button>
-                    )}
-                  </>
+                {/* 3. FINISH BUTTON */}
+                {userRole === 'admin' && job.status !== "Completed" && !isMissingDetails && (
+                  <button onClick={() => handleCompleteJob(job)} className="btn-save">Finish</button>
                 )}
                 
-                {/* DELETE BUTTON */}
+                {/* 4. DELETE BUTTON */}
                 {userRole === 'admin' && (
                   <button onClick={() => handleDeleteJob(job.id)} className="btn-icon-del" title="Delete">🗑️</button>
                 )}
@@ -218,6 +294,7 @@ export default function AdminDashboard() {
   );
 }
 
+// ... (KEEP THE JOBMODAL AND GENERATEPDF FUNCTION AS THEY WERE, JUST PASTE THEM BELOW HERE) ...
 // --- MODAL (CREATE / UPDATE) ---
 function JobModal({ job, products, onClose }) {
   const [formData, setFormData] = useState({
@@ -241,7 +318,6 @@ function JobModal({ job, products, onClose }) {
     }
   }, [job, products]);
 
-  // Auto-Price
   useEffect(() => {
     if (formData.productId) {
       const prod = products.find(p => p.id === formData.productId);
@@ -252,9 +328,7 @@ function JobModal({ job, products, onClose }) {
   const handleSubmit = async () => {
     if(!formData.name) return alert("Name required");
     
-    // Default to TODAY if date is empty
     const finalDueDate = formData.dueDate || new Date().toISOString().split('T')[0];
-
     const total = Number(formData.totalCost || 0);
     const adv = Number(formData.advance || 0);
     const bal = total - adv;
@@ -263,7 +337,6 @@ function JobModal({ job, products, onClose }) {
     const pName = selectedProduct ? selectedProduct.name : "Custom";
     const pCode = selectedProduct ? selectedProduct.code : "CUST";
 
-    // Prepare Job Data Object
     const jobData = {
       customerName: formData.name,
       customerEmail: formData.email,
@@ -280,12 +353,10 @@ function JobModal({ job, products, onClose }) {
     let updatedJobId = job ? job.id : null;
 
     if (job) {
-      // UPDATE
       await updateDoc(doc(db, "jobs", job.id), jobData);
       updatedJobId = job.id;
       alert("Job Updated!");
     } else {
-      // CREATE
       await runTransaction(db, async (t) => {
         const counterRef = doc(db, "counters", "jobCounter");
         const counterDoc = await t.get(counterRef);
@@ -301,15 +372,12 @@ function JobModal({ job, products, onClose }) {
       alert("Job Created!");
     }
 
-    // --- SEND RECEIPT EMAIL NOW ---
-    // Generate the PDF
     const pdfBase64 = await generatePDFBase64({ ...jobData, id: updatedJobId });
     
-    // Send Email
     fetch('/.netlify/functions/sendReceipt', {
       method: 'POST',
       body: JSON.stringify({
-        type: 'JOB_UPDATED', // New Email Type
+        type: 'JOB_UPDATED',
         name: formData.name,
         email: formData.email,
         jobId: updatedJobId,
@@ -367,11 +435,9 @@ function JobModal({ job, products, onClose }) {
   );
 }
 
-// --- DETAILED PDF GENERATOR WITH LOGO ---
+// --- PDF GENERATOR ---
 const generatePDFBase64 = async (job) => {
   const doc = new jsPDF();
-  
-  // 1. Load Logo Helper
   const getBase64ImageFromURL = (url) => {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -391,29 +457,19 @@ const generatePDFBase64 = async (job) => {
 
   try {
     const logoBase64 = await getBase64ImageFromURL(COMPANY.logoUrl);
-    doc.addImage(logoBase64, 'PNG', 15, 10, 40, 15); // x, y, w, h
-  } catch(e) {
-    // If logo fails, fallback to text
-    doc.setFontSize(22);
-    doc.text("STUDIO CLICK", 15, 20);
-  }
+    doc.addImage(logoBase64, 'PNG', 15, 10, 40, 15);
+  } catch(e) { doc.setFontSize(22); doc.text("STUDIO CLICK", 15, 20); }
 
-  // Header Info
   doc.setFontSize(10);
   doc.text(COMPANY.address, 150, 15, { align: 'right' });
   doc.text(COMPANY.phone, 150, 20, { align: 'right' });
-  
-  doc.line(15, 35, 195, 35); // Divider
+  doc.line(15, 35, 195, 35);
 
-  // Invoice Title
   doc.setFontSize(16);
   doc.text("OFFICIAL RECEIPT", 105, 50, null, null, "center");
 
-  // Customer & Job Details (Grid Layout)
   doc.setFontSize(11);
   doc.setDrawColor(200);
-  
-  // Box 1: Customer
   doc.rect(15, 60, 90, 30);
   doc.text("BILL TO:", 20, 68);
   doc.setFont(undefined, 'bold');
@@ -421,13 +477,11 @@ const generatePDFBase64 = async (job) => {
   doc.setFont(undefined, 'normal');
   doc.text(job.customerPhone || "", 20, 82);
 
-  // Box 2: Job Info
   doc.rect(105, 60, 90, 30);
   doc.text(`RECEIPT #: ${job.id}`, 110, 68);
   doc.text(`DATE: ${new Date().toLocaleDateString()}`, 110, 75);
   doc.text(`DUE DATE: ${job.dueDate || "N/A"}`, 110, 82);
 
-  // Table Header
   let y = 105;
   doc.setFillColor(240, 240, 240);
   doc.rect(15, y, 180, 10, "F");
@@ -435,19 +489,15 @@ const generatePDFBase64 = async (job) => {
   doc.text("DESCRIPTION", 20, y+7);
   doc.text("PRICE (LKR)", 160, y+7);
 
-  // Table Body
   y += 20;
   doc.setFont(undefined, 'normal');
   doc.text(job.productName || "Service", 20, y);
   doc.text(`${Number(job.totalCost).toFixed(2)}`, 160, y);
-  
   doc.line(15, y+5, 195, y+5);
 
-  // Totals Area
   y += 15;
   doc.text("Sub Total:", 120, y);
   doc.text(`${Number(job.totalCost).toFixed(2)}`, 160, y);
-  
   y += 10;
   doc.text("Advance Paid:", 120, y);
   doc.text(`- ${Number(job.advance).toFixed(2)}`, 160, y);
@@ -455,23 +505,20 @@ const generatePDFBase64 = async (job) => {
   y += 15;
   doc.setFont(undefined, 'bold');
   doc.setFontSize(14);
-  
   const balance = Number(job.balance) > 0 ? Number(job.balance) : 0;
-  
   if (balance === 0) {
-    doc.setTextColor(0, 150, 0); // Green
+    doc.setTextColor(0, 150, 0);
     doc.text("FULLY PAID", 120, y);
   } else {
-    doc.setTextColor(200, 0, 0); // Red
+    doc.setTextColor(200, 0, 0);
     doc.text("BALANCE DUE:", 120, y);
     doc.text(`${balance.toFixed(2)}`, 165, y);
   }
 
-  // Footer
   doc.setTextColor(0);
   doc.setFontSize(10);
   doc.setFont(undefined, 'italic');
   doc.text("Thank you for your business!", 105, 280, null, null, "center");
 
-  return doc.output('datauristring').split(',')[1]; // Return Base64
+  return doc.output('datauristring').split(',')[1];
 };
