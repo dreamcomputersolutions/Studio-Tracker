@@ -10,28 +10,53 @@ export default function CustomerForm() {
     try {
       await addDoc(collection(db, "jobs"), {
         ...formData,
-        status: "Pending", // Admin needs to finish this
+        status: "Pending",
         createdAt: serverTimestamp()
       });
-      alert("Registered! Please wait for the staff.");
-      setFormData({ name: '', email: '', phone: '' }); // Reset form
+      alert("Registration Successful! Please wait for your photo session.");
+      setFormData({ name: '', email: '', phone: '' });
     } catch (err) {
       console.error(err);
+      alert("Error registering.");
     }
   };
 
   return (
-    <div style={{ padding: '20px' }}>
-      <h2>Customer Registration</h2>
+    <div className="container form-container">
+      <div className="brand-header center">
+        {/* Placeholder Logo */}
+        <img src="https://placehold.co/150x50?text=Studio+Click" alt="Logo" className="logo" />
+        <h2>Welcome to Studio Click</h2>
+        <p>336 Kaduwela Road, Battaramulla</p>
+      </div>
+
       <form onSubmit={handleSubmit}>
-        <input placeholder="Name" onChange={(e) => setFormData({...formData, name: e.target.value})} required />
-        <br /><br />
-        <input placeholder="Email" type="email" onChange={(e) => setFormData({...formData, email: e.target.value})} required />
-        <br /><br />
-        <input placeholder="Phone" onChange={(e) => setFormData({...formData, phone: e.target.value})} required />
-        <br /><br />
-        <button type="submit">Register</button>
+        <label>Full Name</label>
+        <input 
+          value={formData.name}
+          onChange={(e) => setFormData({...formData, name: e.target.value})} 
+          required 
+        />
+        
+        <label>Email Address</label>
+        <input 
+          type="email"
+          value={formData.email}
+          onChange={(e) => setFormData({...formData, email: e.target.value})} 
+          required 
+        />
+        
+        <label>Phone Number</label>
+        <input 
+          value={formData.phone}
+          onChange={(e) => setFormData({...formData, phone: e.target.value})} 
+          required 
+        />
+
+        <button type="submit">Register for Job</button>
       </form>
+      
+      <p className="footer-contact">Questions? Call 077 731 1230</p>
     </div>
   );
 }
