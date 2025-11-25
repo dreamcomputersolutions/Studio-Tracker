@@ -143,4 +143,40 @@ input[type=number] { -moz-appearance: textfield; }
   .job-date { border-right: none; border-bottom: 1px solid #eee; padding-bottom: 10px; justify-content: flex-start; }
   .job-info { padding-left: 0; }
   .job-actions-v2 { flex-direction: row; padding-left: 0; }
+
+  /* --- NEW STATUS: READY --- */
+.job-row-v2.Ready { 
+  border-left-color: #3b82f6; /* Blue */
+  background: #eff6ff;
+}
+
+.badge-ready { 
+  background: #dbeafe; 
+  color: #1e40af; 
+  padding: 2px 8px; 
+  border-radius: 4px; 
+  font-size: 0.7rem; 
+  margin-left: 8px; 
+  font-weight: bold; 
+  text-transform: uppercase; 
+}
+
+/* Filter Button for Ready */
+.filter-btn.active-ready { 
+  background: #3b82f6; 
+  color: white; 
+  border-color: #3b82f6; 
+}
+
+/* Staff "Mark Done" Button */
+.btn-ready {
+  background: #3b82f6; 
+  color: white; 
+  border: none; 
+  padding: 8px 16px; 
+  border-radius: 8px; 
+  font-weight: 600; 
+  cursor: pointer;
+}
+.btn-ready:hover { background: #2563eb; }
 }
