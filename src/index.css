@@ -216,4 +216,32 @@ body {
   .job-actions-v2 { flex-direction: row; justify-content: flex-start; padding-left: 0; }
   .btn-icon, .btn-save { width: 100%; text-align: center; }
   .header-v2 { flex-direction: column; align-items: flex-start; gap: 15px; }
+
+  /* --- FIXES --- */
+
+/* Hide Number Arrows/Spinners */
+input[type=number]::-webkit-inner-spin-button, 
+input[type=number]::-webkit-outer-spin-button { 
+  -webkit-appearance: none; 
+  margin: 0; 
+}
+input[type=number] {
+  -moz-appearance: textfield; /* Firefox */
+}
+
+/* Force Customer Form Styling */
+.form-container input {
+  display: block;
+  width: 100%;
+  padding: 15px;
+  margin-bottom: 15px;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  font-size: 1rem;
+}
+.form-container label {
+  font-weight: bold;
+  margin-bottom: 5px;
+  display: block;
+}
 }

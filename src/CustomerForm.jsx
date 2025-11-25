@@ -12,7 +12,6 @@ export default function CustomerForm() {
 
     try {
       await runTransaction(db, async (transaction) => {
-        // 1. Get Counter
         const counterRef = doc(db, "counters", "jobCounter");
         const counterDoc = await transaction.get(counterRef);
         
@@ -21,10 +20,7 @@ export default function CustomerForm() {
           newCount = counterDoc.data().current + 1;
         }
 
-        // 2. Create ID
         const newId = `SC-${String(newCount).padStart(4, '0')}`;
-        
-        // 3. Update
         transaction.set(counterRef, { current: newCount });
         
         const jobRef = doc(db, "jobs", newId);
@@ -46,53 +42,44 @@ export default function CustomerForm() {
 
   return (
     <div className="container form-container">
-      <div className="brand-header">
-        <img src="/LOGO.png" alt="Studio Click" className="logo" />
+      <div style={{textAlign:'center', marginBottom:'30px'}}>
+        <img src="/LOGO.png" alt="Studio Click" style={{height:'80px'}} />
         <h1>Welcome to Studio Click</h1>
-        <p>336 Kaduwela Road, Battaramulla</p>
+        <p style={{color:'#666'}}>336 Kaduwela Road, Battaramulla</p>
       </div>
 
       <form onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label>Full Name</label>
-          <input 
-            className="form-input"
-            value={formData.name} 
-            onChange={(e) => setFormData({...formData, name: e.target.value})} 
-            required 
-            placeholder="Enter your name"
-          />
-        </div>
+        <label>Full Name</label>
+        <input 
+          value={formData.name} 
+          onChange={(e) => setFormData({...formData, name: e.target.value})} 
+          required 
+          placeholder="Enter your name"
+        />
         
-        <div className="form-group">
-          <label>Email Address</label>
-          <input 
-            type="email"
-            className="form-input"
-            value={formData.email} 
-            onChange={(e) => setFormData({...formData, email: e.target.value})} 
-            required 
-            placeholder="name@example.com"
-          />
-        </div>
+        <label>Email Address</label>
+        <input 
+          type="email"
+          value={formData.email} 
+          onChange={(e) => setFormData({...formData, email: e.target.value})} 
+          required 
+          placeholder="name@example.com"
+        />
         
-        <div className="form-group">
-          <label>Phone Number</label>
-          <input 
-            className="form-input"
-            value={formData.phone} 
-            onChange={(e) => setFormData({...formData, phone: e.target.value})} 
-            required 
-            placeholder="077..."
-          />
-        </div>
+        <label>Phone Number</label>
+        <input 
+          value={formData.phone} 
+          onChange={(e) => setFormData({...formData, phone: e.target.value})} 
+          required 
+          placeholder="077..."
+        />
 
-        <button type="submit" className="btn-submit" disabled={loading}>
+        <button type="submit" className="btn-save" style={{width:'100%', padding:'15px', fontSize:'1.1rem'}}>
           {loading ? "Registering..." : "Register for Job"}
         </button>
       </form>
       
-      <p className="footer-contact">Questions? Call 077 731 1230</p>
+      <p style={{textAlign:'center', marginTop:'20px', color:'#999'}}>Questions? Call 077 731 1230</p>
     </div>
   );
 }

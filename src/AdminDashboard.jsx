@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, updateDoc, addDoc, serverTimestamp, query, orderBy, runTransaction } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, addDoc, serverTimestamp, query, runTransaction } from 'firebase/firestore';
 import { db } from './firebase';
 import { jsPDF } from "jspdf";
-import ProductManager from './ProductManager'; // Import the new file
+import ProductManager from './ProductManager';
 
 const COMPANY = {
   name: "Studio Click",
@@ -12,41 +12,35 @@ const COMPANY = {
 };
 
 export default function AdminDashboard() {
-  // --- STATES ---
-  const [userRole, setUserRole] = useState(null); // 'admin' or 'staff'
-  const [view, setView] = useState('dashboard'); // 'dashboard', 'products'
+  const [userRole, setUserRole] = useState(null); 
+  const [view, setView] = useState('dashboard');
   const [jobs, setJobs] = useState([]);
   const [products, setProducts] = useState([]);
   const [showJobModal, setShowJobModal] = useState(false);
-  
-  // Stats
-  const [stats, setStats] = useState({ 
-    totalJobs: 0, cashIncome: 0, cardIncome: 0, dueBalance: 0 
-  });
+  const [stats, setStats] = useState({ totalJobs: 0, cashIncome: 0, cardIncome: 0, dueBalance: 0 });
 
-  // --- 1. INITIAL FETCH ---
+  // --- 1. DATA FETCHING ---
   useEffect(() => {
-    // Fetch Products for Dropdown
+    // Products
     const unsubProd = onSnapshot(collection(db, "products"), (snap) => {
       setProducts(snap.docs.map(d => ({...d.data(), id: d.id})));
     });
 
-    // Fetch Jobs
-    const q = query(collection(db, "jobs"), orderBy("createdAt", "desc"));
-    const unsubJobs = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(d => ({...d.data(), id: d.id}));
+    // Jobs - Removed 'orderBy' temporarily to ensure data loads even if index is missing
+    const unsubJobs = onSnapshot(collection(db, "jobs"), (snap) => {
+      let data = snap.docs.map(d => ({...d.data(), id: d.id}));
+      
+      // Sort manually in Javascript to be safe
+      data.sort((a, b) => (b.id || "").localeCompare(a.id || ""));
+      
       setJobs(data);
 
-      // Calculate V2.0 Stats
+      // Calc Stats
       let cash = 0, card = 0, due = 0;
       data.forEach(job => {
-        // Calculate Income based on Pay Method
         const paid = Number(job.advance || 0) + (job.status === "Completed" ? Number(job.balance || 0) : 0);
-        
         if(job.payMethod === "Cash") cash += paid;
         if(job.payMethod === "Card") card += paid;
-        
-        // Calculate Pending Balance
         if(job.status !== "Completed") due += Number(job.balance || 0);
       });
       setStats({ totalJobs: data.length, cashIncome: cash, cardIncome: card, dueBalance: due });
@@ -56,52 +50,54 @@ export default function AdminDashboard() {
   }, []);
 
   // --- 2. ACTIONS ---
-  
   const handleNotifyCustomer = async (job) => {
-    // Send "Ready to Collect" Email
-    const confirm = window.confirm("Send 'Ready to Collect' email to customer?");
-    if(!confirm) return;
-
+    if(!confirm("Send 'Ready to Collect' email?")) return;
     try {
       await fetch('/.netlify/functions/sendReceipt', {
         method: 'POST',
         body: JSON.stringify({
-          type: 'READY_NOTIFY', // New Flag for Backend
+          type: 'READY_NOTIFY',
           name: job.customerName,
           email: job.customerEmail,
           jobId: job.id
         })
       });
-      alert("Notification Sent!");
-    } catch(e) { alert("Email failed"); }
+      alert("Email Sent!");
+    } catch(e) { alert("Email Failed"); console.error(e); }
   };
 
   const handleCompleteJob = async (job) => {
-    if(job.balance > 0 && !window.confirm(`Customer owes LKR ${job.balance}. Mark as paid & completed?`)) return;
-    
-    // Generate Final Receipt PDF
-    const pdfBase64 = generatePDFBase64(job, "FINAL");
+    if(job.balance > 0 && !confirm(`Customer owes LKR ${job.balance}. Mark as Paid & Completed?`)) return;
 
+    // 1. Generate PDF String
+    const pdfBase64 = generatePDFBase64(job);
+
+    // 2. Update DB
     await updateDoc(doc(db, "jobs", job.id), {
       status: "Completed",
       completedAt: serverTimestamp()
     });
 
-    // Email Final Receipt
-    await fetch('/.netlify/functions/sendReceipt', {
-      method: 'POST',
-      body: JSON.stringify({
-        type: 'RECEIPT',
-        name: job.customerName,
-        email: job.customerEmail,
-        jobId: job.id,
-        pdfBase64
-      })
-    });
-    alert("Job Completed!");
+    // 3. Send Email
+    try {
+      await fetch('/.netlify/functions/sendReceipt', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'RECEIPT',
+          name: job.customerName,
+          email: job.customerEmail,
+          jobId: job.id,
+          pdfBase64: pdfBase64
+        })
+      });
+      alert("Job Completed & Receipt Sent!");
+    } catch(e) { 
+      console.error(e);
+      alert("Job saved but Email failed."); 
+    }
   };
 
-  // --- 3. LOGIN SCREEN (Simple Version) ---
+  // --- 3. LOGIN UI ---
   if (!userRole) {
     return (
       <div className="login-screen">
@@ -115,40 +111,32 @@ export default function AdminDashboard() {
     );
   }
 
+  // --- 4. DASHBOARD UI ---
   return (
     <div className="container dashboard-container">
-      {/* HEADER */}
       <div className="header-v2">
         <div style={{display:'flex', alignItems:'center', gap:'15px'}}>
           <img src={COMPANY.logo} className="logo-small" />
           <div>
             <h2 style={{margin:0}}>Studio Dashboard</h2>
-            <span className="badge">{userRole.toUpperCase()} MODE</span>
+            <span className="badge">{userRole.toUpperCase()}</span>
           </div>
         </div>
         <div style={{display:'flex', gap:'10px'}}>
           {userRole === 'admin' && (
-            <button onClick={() => setShowJobModal(true)} className="btn-new">+ New Job</button>
-          )}
-          {userRole === 'admin' && (
-            <button onClick={() => setView('products')} className="btn-secondary">Products</button>
+            <>
+              <button onClick={() => setShowJobModal(true)} className="btn-new">+ New Job</button>
+              <button onClick={() => setView('products')} className="btn-secondary">Products</button>
+            </>
           )}
           <button onClick={() => setUserRole(null)} className="btn-logout">Logout</button>
         </div>
       </div>
 
-      {/* PRODUCT MANAGER POPUP */}
       {view === 'products' && <ProductManager onClose={() => setView('dashboard')} />}
 
-      {/* NEW JOB MODAL */}
-      {showJobModal && (
-        <NewJobModal 
-          products={products} 
-          onClose={() => setShowJobModal(false)} 
-        />
-      )}
+      {showJobModal && <NewJobModal products={products} onClose={() => setShowJobModal(false)} />}
 
-      {/* STATS (Admin Only) */}
       {userRole === 'admin' && (
         <div className="stats-grid">
           <div className="stat-card"><h3>Total Jobs</h3><p>{stats.totalJobs}</p></div>
@@ -158,14 +146,14 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* JOB LIST */}
       <div className="job-list-v2">
+        {jobs.length === 0 && <p style={{textAlign:'center'}}>No jobs found. Create one!</p>}
         {jobs.map(job => (
           <div key={job.id} className={`job-row-v2 ${job.status}`}>
             <div className="job-date">
               <span className="date-box">
-                {new Date(job.dueDate).getDate()} <br/>
-                <small>{new Date(job.dueDate).toLocaleString('default', { month: 'short' })}</small>
+                {job.dueDate ? new Date(job.dueDate).getDate() : "--"} <br/>
+                <small>{job.dueDate ? new Date(job.dueDate).toLocaleString('default', { month: 'short' }) : ""}</small>
               </span>
             </div>
             
@@ -180,7 +168,7 @@ export default function AdminDashboard() {
               </div>
               <div className="job-finance">
                 Total: {job.totalCost} | Paid: {job.advance} | 
-                <span style={{color: job.balance > 0 ? 'red' : 'green', fontWeight:'bold'}}>
+                <span style={{color: job.balance > 0 ? 'red' : 'green', fontWeight:'bold', marginLeft:'5px'}}>
                   Due: {job.balance}
                 </span>
               </div>
@@ -189,7 +177,7 @@ export default function AdminDashboard() {
             <div className="job-actions-v2">
               {job.status !== "Completed" && (
                 <>
-                  <button onClick={() => handleNotifyCustomer(job)} className="btn-icon" title="Notify Ready">📧 Ready</button>
+                  <button onClick={() => handleNotifyCustomer(job)} className="btn-icon">📧 Ready</button>
                   {userRole === 'admin' && (
                     <button onClick={() => handleCompleteJob(job)} className="btn-save">Finish</button>
                   )}
@@ -203,18 +191,18 @@ export default function AdminDashboard() {
   );
 }
 
-// --- NEW JOB MODAL COMPONENT ---
+// --- SUB COMPONENTS ---
 function NewJobModal({ products, onClose }) {
   const [formData, setFormData] = useState({
     name: '', email: '', phone: '', dueDate: '',
     productId: '', payMethod: 'Cash', advance: ''
   });
 
-  const selectedProduct = products.find(p => p.id === formData.productId);
-
   const handleSubmit = async () => {
-    if(!formData.name || !formData.productId) return alert("Details Missing");
+    if(!formData.name || !formData.productId) return alert("Please fill Name and Select Product");
 
+    const selectedProduct = products.find(p => p.id === formData.productId);
+    
     await runTransaction(db, async (t) => {
       const counterRef = doc(db, "counters", "jobCounter");
       const counterDoc = await t.get(counterRef);
@@ -247,45 +235,72 @@ function NewJobModal({ products, onClose }) {
     <div className="modal-overlay">
       <div className="modal-content">
         <h2>Create New Job</h2>
-        
-        <label>Customer Details</label>
-        <input placeholder="Name" onChange={e=>setFormData({...formData, name:e.target.value})} />
-        <input placeholder="Phone" onChange={e=>setFormData({...formData, phone:e.target.value})} />
-        <input placeholder="Email" type="email" onChange={e=>setFormData({...formData, email:e.target.value})} />
-
-        <label>Job Details</label>
+        <label>Customer Name</label>
+        <input onChange={e=>setFormData({...formData, name:e.target.value})} />
+        <label>Email</label>
+        <input type="email" onChange={e=>setFormData({...formData, email:e.target.value})} />
+        <label>Select Product</label>
         <select onChange={e=>setFormData({...formData, productId:e.target.value})}>
-          <option value="">Select Product...</option>
-          {products.map(p => <option key={p.id} value={p.id}>{p.code} - {p.name} (LKR {p.price})</option>)}
+          <option value="">-- Select --</option>
+          {products.map(p => <option key={p.id} value={p.id}>{p.code} - {p.name} ({p.price})</option>)}
         </select>
+        <label>Due Date</label>
         <input type="date" onChange={e=>setFormData({...formData, dueDate:e.target.value})} />
-
-        <label>Payment</label>
+        <label>Payment (Advance)</label>
         <div style={{display:'flex', gap:'10px'}}>
           <select onChange={e=>setFormData({...formData, payMethod:e.target.value})}>
             <option>Cash</option><option>Card</option>
           </select>
-          <input type="number" placeholder="Advance Amount" onChange={e=>setFormData({...formData, advance:e.target.value})} />
+          <input type="number" placeholder="Amount Paid" onChange={e=>setFormData({...formData, advance:e.target.value})} />
         </div>
-
         <div style={{marginTop:'20px', display:'flex', gap:'10px'}}>
-          <button onClick={handleSubmit} className="btn-save">Create Job</button>
-          <button onClick={onClose} style={{background:'#ccc'}}>Cancel</button>
+          <button onClick={handleSubmit} className="btn-save">Create</button>
+          <button onClick={onClose} style={{background:'#ccc', border:'none', padding:'10px', borderRadius:'8px'}}>Cancel</button>
         </div>
       </div>
     </div>
   );
 }
 
-// --- PDF HELPER (Updated for Logo) ---
-// Note: We need to convert the Logo URL to Base64 in a real app, 
-// but for now, we will assume the logo is loaded or skip it to prevent CORS errors.
-const generatePDFBase64 = (job, type) => {
+// --- PDF GENERATOR ---
+const generatePDFBase64 = (job) => {
   const doc = new jsPDF();
-  doc.text(COMPANY.name, 20, 20);
-  doc.text(`Receipt for ${job.id}`, 20, 30);
-  doc.text(`Total: ${job.totalCost}`, 20, 40);
-  doc.text(`Paid: ${job.advance}`, 20, 50);
-  doc.text(`Balance: ${job.balance}`, 20, 60);
-  return btoa(doc.output()); 
+  doc.setFontSize(20);
+  doc.text(COMPANY.name, 105, 20, null, null, "center");
+  doc.setFontSize(10);
+  doc.text(COMPANY.address, 105, 30, null, null, "center");
+  doc.text(`Tel: ${COMPANY.phone}`, 105, 35, null, null, "center");
+  doc.line(20, 40, 190, 40);
+
+  doc.setFontSize(16);
+  doc.text("FINAL RECEIPT", 105, 55, null, null, "center");
+
+  doc.setFontSize(12);
+  doc.text(`Job ID: ${job.id}`, 20, 70);
+  doc.text(`Date: ${new Date().toLocaleDateString()}`, 140, 70);
+  doc.text(`Customer: ${job.customerName}`, 20, 80);
+
+  let y = 100;
+  doc.text("Description", 20, y);
+  doc.text("Amount", 160, y);
+  doc.line(20, y+2, 190, y+2);
+  y += 15;
+  
+  doc.text(`${job.productName} (${job.productCode})`, 20, y);
+  doc.text(`${job.totalCost}.00`, 160, y);
+  
+  y += 20;
+  doc.text(`Advance Paid:`, 100, y);
+  doc.text(`${job.advance}.00`, 160, y);
+  y += 10;
+  doc.text(`Balance Paid:`, 100, y);
+  doc.text(`${job.balance}.00`, 160, y);
+  
+  doc.setFont(undefined, 'bold');
+  y += 15;
+  doc.text("TOTAL PAID:", 100, y);
+  doc.text(`${job.totalCost}.00`, 160, y);
+
+  doc.save(`Receipt_${job.id}.pdf`); // Auto download
+  return btoa(doc.output()); // Return for Email
 };
