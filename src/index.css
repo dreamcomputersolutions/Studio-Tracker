@@ -1,23 +1,23 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
 
 :root {
-  --primary: #4f46e5;
+  --primary: #4f46e5;       /* Studio Indigo */
   --primary-hover: #4338ca;
-  --bg-color: #f3f4f6;
+  --bg-color: #f3f4f6;      /* Light Grey Background */
   --card-bg: #ffffff;
   --text-main: #111827;
   --text-sub: #6b7280;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --danger: #ef4444;
+  --success: #10b981;       /* Green */
+  --warning: #f59e0b;       /* Orange */
+  --danger: #ef4444;        /* Red */
 }
 
 body {
-  font-family: 'Poppins', sans-serif; /* Modern Font */
+  font-family: 'Poppins', sans-serif;
   background-color: var(--bg-color);
   color: var(--text-main);
   margin: 0;
-  padding: 20px;
+  padding: 0; /* Reset padding for full screen login */
   min-height: 100vh;
 }
 
@@ -25,222 +25,195 @@ body {
 .container {
   background: var(--card-bg);
   border-radius: 16px;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
   width: 100%;
-  margin: 0 auto;
-  overflow: hidden; /* Keeps child elements inside rounded corners */
+  margin: 20px auto; /* Added margin back since body padding is 0 */
+  box-sizing: border-box;
 }
 
-/* Specific Sizes */
 .form-container { max-width: 480px; padding: 2rem; }
-.dashboard-container { max-width: 1000px; padding: 2rem; }
+.dashboard-container { max-width: 1100px; padding: 2rem; }
 
-/* --- BRANDING --- */
-.brand-header {
+/* --- LOGIN SCREEN (NEW) --- */
+.login-screen {
   display: flex;
-  flex-direction: column;
+  justify-content: center;
   align-items: center;
-  margin-bottom: 2rem;
+  height: 100vh;
+  background: #eef2f6;
+  width: 100%;
+}
+
+.login-box {
+  background: white;
+  padding: 40px;
+  border-radius: 20px;
   text-align: center;
+  box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
+  width: 320px;
 }
 
-.logo { height: 80px; margin-bottom: 1rem; object-fit: contain; }
-.brand-header h1 { margin: 0; font-size: 1.5rem; font-weight: 700; color: var(--text-main); }
-.brand-header p { margin: 0.5rem 0 0; color: var(--text-sub); font-size: 0.9rem; }
+.login-box .logo { height: 60px; margin-bottom: 20px; }
+.login-box h2 { margin-bottom: 30px; color: var(--text-main); }
 
-/* --- FIX: CUSTOMER FORM LAYOUT --- */
-.form-group {
-  margin-bottom: 1.5rem;
+.btn-admin { 
+  width: 100%; background: #1e293b; color: white; padding: 14px; 
+  border-radius: 10px; margin-bottom: 12px; cursor: pointer; border: none; font-weight: 600;
+}
+.btn-staff { 
+  width: 100%; background: var(--primary); color: white; padding: 14px; 
+  border-radius: 10px; cursor: pointer; border: none; font-weight: 600;
 }
 
-.form-group label {
-  display: block; /* Forces label to own line */
-  margin-bottom: 0.5rem;
-  font-weight: 500;
-  color: var(--text-main);
-  font-size: 0.95rem;
+/* --- DASHBOARD HEADER V2 (NEW) --- */
+.header-v2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+  flex-wrap: wrap;
+  gap: 15px;
 }
 
-.form-input {
-  width: 100%;
-  padding: 12px 15px;
-  border: 2px solid #e5e7eb;
-  border-radius: 10px;
-  font-size: 1rem;
+.logo-small { height: 50px; }
+
+.badge {
+  background: #e0e7ff; color: var(--primary); 
+  padding: 4px 8px; border-radius: 6px; 
+  font-size: 0.75rem; font-weight: 700; 
+  vertical-align: middle; margin-left: 10px;
+}
+
+/* Header Buttons */
+.btn-new { background: var(--success); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+.btn-secondary { background: var(--text-main); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; }
+.btn-logout { background: #fee2e2; color: var(--danger); border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+
+/* --- MODALS / POPUPS (NEW) --- */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  display: flex; justify-content: center; align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  padding: 30px;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.modal-content h2 { margin-top: 0; color: var(--text-main); }
+.modal-content label { display: block; margin-top: 15px; font-weight: 600; font-size: 0.9rem; color: var(--text-sub); }
+.modal-content input, .modal-content select { 
+  width: 100%; padding: 12px; margin-top: 6px; 
+  border: 1px solid #d1d5db; border-radius: 8px; box-sizing: border-box; 
   font-family: inherit;
-  box-sizing: border-box; /* Critical for alignment */
-  transition: border-color 0.2s;
 }
 
-.form-input:focus {
-  outline: none;
-  border-color: var(--primary);
-  background-color: #fff;
+/* --- PRODUCT MANAGER (NEW) --- */
+.product-form { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+.product-form input { padding: 10px; border: 1px solid #ddd; border-radius: 8px; }
+.product-row { 
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px; border-bottom: 1px solid #eee; 
+}
+.product-row:last-child { border-bottom: none; }
+
+/* --- JOB LIST V2 (NEW LAYOUT) --- */
+.job-list-v2 { display: flex; flex-direction: column; gap: 15px; }
+
+.job-row-v2 {
+  display: flex;
+  background: white;
+  padding: 15px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  border-left: 6px solid #ccc;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+  transition: transform 0.2s;
 }
 
-.btn-submit {
-  width: 100%;
-  padding: 14px;
-  background-color: var(--primary);
-  color: white;
-  border: none;
-  border-radius: 10px;
-  font-size: 1rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: transform 0.1s, background-color 0.2s;
-  box-shadow: 0 4px 6px rgba(79, 70, 229, 0.2);
+.job-row-v2:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+
+/* Status Colors */
+.job-row-v2.Pending { border-left-color: var(--warning); }
+.job-row-v2.Completed { border-left-color: var(--success); background-color: #fafafa; opacity: 0.85; }
+
+/* 1. Date Box */
+.job-date {
+  padding-right: 20px;
+  border-right: 1px solid #f3f4f6;
+  display: flex;
+  align-items: center;
+  min-width: 60px;
+  justify-content: center;
+}
+.date-box { text-align: center; font-weight: 700; font-size: 1.4rem; line-height: 1; color: var(--text-main); }
+.date-box small { font-size: 0.8rem; color: var(--primary); text-transform: uppercase; display: block; margin-top: 4px; }
+
+/* 2. Info Section */
+.job-info { flex: 1; padding-left: 20px; display: flex; flex-direction: column; justify-content: center; }
+
+.job-title { font-size: 1.1rem; color: var(--text-main); margin-bottom: 4px; }
+.badge-pending { background: #fff7ed; color: #c2410c; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; margin-left: 8px; font-weight: bold; text-transform: uppercase; }
+.badge-completed { background: #ecfdf5; color: #047857; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; margin-left: 8px; font-weight: bold; text-transform: uppercase; }
+
+.job-product { font-size: 0.95rem; color: var(--text-sub); margin-bottom: 6px; }
+.job-finance { 
+  font-size: 0.85rem; 
+  background: #f8fafc; 
+  display: inline-block; 
+  padding: 6px 10px; 
+  border-radius: 6px; 
+  border: 1px solid #e2e8f0;
+  color: var(--text-sub);
 }
 
-.btn-submit:hover { background-color: var(--primary-hover); transform: translateY(-1px); }
-.btn-submit:active { transform: translateY(0); }
+/* 3. Actions */
+.job-actions-v2 { display: flex; flex-direction: column; gap: 8px; justify-content: center; padding-left: 15px; }
+.btn-icon { 
+  background: white; border: 1px solid #d1d5db; padding: 8px 12px; 
+  border-radius: 8px; cursor: pointer; font-size: 0.9rem; color: var(--text-main); 
+  transition: all 0.2s;
+}
+.btn-icon:hover { background: #f3f4f6; border-color: #9ca3af; }
 
-/* --- DASHBOARD STATISTICS --- */
+.btn-save { background: var(--primary); color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+.btn-save:hover { background: var(--primary-hover); }
+
+/* --- STATISTICS CARDS --- */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
   margin-bottom: 30px;
 }
+.stat-card { background: white; padding: 20px; border-radius: 12px; border: 1px solid #e5e7eb; text-align: center; }
+.stat-card h3 { margin: 0; font-size: 0.85rem; color: var(--text-sub); text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-card p { margin: 10px 0 0; font-size: 1.8rem; font-weight: 700; color: var(--text-main); }
 
-.stat-card {
-  background: white;
-  padding: 20px;
-  border-radius: 12px;
-  border: 1px solid #f3f4f6;
-  text-align: center;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-}
-
-.stat-card h3 { margin: 0; font-size: 0.85rem; color: var(--text-sub); text-transform: uppercase; letter-spacing: 1px; }
-.stat-card p { margin: 10px 0 0; font-size: 2rem; font-weight: 700; color: var(--primary); }
-
-/* Highlight the Income Card */
-.stat-card.highlight {
-  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
-  color: white;
-  border: none;
-}
+.stat-card.highlight { background: var(--primary); border: none; }
 .stat-card.highlight h3 { color: rgba(255,255,255,0.8); }
 .stat-card.highlight p { color: white; }
 
-/* --- FILTER BAR --- */
-.filter-bar {
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-  margin-bottom: 20px;
-}
-
-.filter-btn {
-  background: transparent;
-  border: 2px solid #e5e7eb;
-  padding: 8px 16px;
-  border-radius: 20px;
-  cursor: pointer;
-  font-weight: 600;
-  color: var(--text-sub);
-  transition: all 0.2s;
-}
-
-.filter-btn.active {
-  background: var(--text-main);
-  color: white;
-  border-color: var(--text-main);
-}
-
-/* --- JOB LIST (ATTRACTIVE ROWS) --- */
-.job-list { display: flex; flex-direction: column; gap: 12px; }
-
-.job-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: white;
-  padding: 16px 20px;
-  border-radius: 12px;
-  border: 1px solid #f3f4f6;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.03);
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.job-row:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 15px rgba(0,0,0,0.06);
-}
-
-/* Status Borders */
-.row-pending { border-left: 6px solid var(--warning); }
-.row-completed { border-left: 6px solid var(--success); opacity: 0.8; background-color: #fafafa; }
-
-/* Row Content Layout */
-.row-info { flex: 1.5; }
-.row-details { flex: 2; display: flex; gap: 10px; justify-content: center; }
-.row-actions { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
-
-/* Typography inside Row */
-.job-id {
-  background: #f3f4f6;
-  color: var(--text-sub);
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  font-family: monospace;
-  margin-right: 10px;
-}
-
-.customer-name { font-weight: 600; color: var(--text-main); font-size: 1.05rem; }
-.customer-phone { display: block; font-size: 0.85rem; color: var(--text-sub); margin-top: 4px; }
-
-/* Inputs in Row */
-.compact-input {
-  padding: 8px 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  width: 100%;
-}
-
-/* Buttons in Row */
-.btn-save {
-  background: var(--primary);
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.btn-save:hover { background: var(--primary-hover); }
-
-.btn-print {
-  background: #f3f4f6;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 1.2rem;
-  transition: background 0.2s;
-}
-.btn-print:hover { background: #e5e7eb; }
-
-/* Status Badges */
-.badge {
-  padding: 6px 12px;
-  border-radius: 20px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.badge-pending { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
-.badge-completed { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
-
-/* Footer */
-.footer-contact { text-align: center; margin-top: 2rem; color: var(--text-sub); font-size: 0.9rem; }
-
-/* Mobile */
-@media (max-width: 768px) {
-  .job-row { flex-direction: column; align-items: flex-start; gap: 15px; }
-  .row-details, .row-actions { width: 100%; justify-content: space-between; }
+/* --- RESPONSIVE MOBILE --- */
+@media (max-width: 600px) {
+  .job-row-v2 { flex-direction: column; gap: 15px; }
+  .job-date { border-right: none; border-bottom: 1px solid #eee; padding-bottom: 10px; padding-right: 0; justify-content: flex-start; }
+  .date-box { display: flex; gap: 10px; align-items: baseline; }
+  .job-info { padding-left: 0; }
+  .job-actions-v2 { flex-direction: row; justify-content: flex-start; padding-left: 0; }
+  .btn-icon, .btn-save { width: 100%; text-align: center; }
+  .header-v2 { flex-direction: column; align-items: flex-start; gap: 15px; }
 }

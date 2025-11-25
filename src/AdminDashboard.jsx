@@ -1,223 +1,291 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, updateDoc, orderBy, query } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, addDoc, serverTimestamp, query, orderBy, runTransaction } from 'firebase/firestore';
 import { db } from './firebase';
 import { jsPDF } from "jspdf";
+import ProductManager from './ProductManager'; // Import the new file
 
 const COMPANY = {
   name: "Studio Click",
-  address: "336 Kaduwela Road, Battaramulla, Sri Lanka",
+  address: "336 Kaduwela Road, Battaramulla",
   phone: "077 731 1230",
   logo: "/LOGO.png"
 };
 
 export default function AdminDashboard() {
-  const [allJobs, setAllJobs] = useState([]);
-  const [filter, setFilter] = useState('all'); // 'all', 'pending', 'completed'
-  const [stats, setStats] = useState({ total: 0, today: 0, income: 0 });
+  // --- STATES ---
+  const [userRole, setUserRole] = useState(null); // 'admin' or 'staff'
+  const [view, setView] = useState('dashboard'); // 'dashboard', 'products'
+  const [jobs, setJobs] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [showJobModal, setShowJobModal] = useState(false);
+  
+  // Stats
+  const [stats, setStats] = useState({ 
+    totalJobs: 0, cashIncome: 0, cardIncome: 0, dueBalance: 0 
+  });
 
+  // --- 1. INITIAL FETCH ---
   useEffect(() => {
-    const q = query(collection(db, "jobs"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const jobsData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-      setAllJobs(jobsData);
-
-      let total = 0, todayCount = 0, income = 0;
-      const todayStr = new Date().toDateString();
-
-      jobsData.forEach(job => {
-        total++;
-        if (job.status === "Completed" && job.finalizedDate === todayStr) {
-          todayCount++;
-          income += Number(job.totalCost || 0);
-        }
-      });
-      setStats({ total, today: todayCount, income });
+    // Fetch Products for Dropdown
+    const unsubProd = onSnapshot(collection(db, "products"), (snap) => {
+      setProducts(snap.docs.map(d => ({...d.data(), id: d.id})));
     });
-    return unsubscribe;
+
+    // Fetch Jobs
+    const q = query(collection(db, "jobs"), orderBy("createdAt", "desc"));
+    const unsubJobs = onSnapshot(q, (snap) => {
+      const data = snap.docs.map(d => ({...d.data(), id: d.id}));
+      setJobs(data);
+
+      // Calculate V2.0 Stats
+      let cash = 0, card = 0, due = 0;
+      data.forEach(job => {
+        // Calculate Income based on Pay Method
+        const paid = Number(job.advance || 0) + (job.status === "Completed" ? Number(job.balance || 0) : 0);
+        
+        if(job.payMethod === "Cash") cash += paid;
+        if(job.payMethod === "Card") card += paid;
+        
+        // Calculate Pending Balance
+        if(job.status !== "Completed") due += Number(job.balance || 0);
+      });
+      setStats({ totalJobs: data.length, cashIncome: cash, cardIncome: card, dueBalance: due });
+    });
+
+    return () => { unsubProd(); unsubJobs(); };
   }, []);
 
-  // --- NEW: Calculate Counts for Buttons ---
-  const pendingCount = allJobs.filter(job => job.status === "Pending").length;
-  const completedCount = allJobs.filter(job => job.status === "Completed").length;
-  const totalCount = allJobs.length;
-
-  const handleFinalize = async (job, sizes, cost) => {
-    if(!confirm("Mark this job as completed?")) return;
-
-    const jobRef = doc(db, "jobs", job.id);
-    await updateDoc(jobRef, {
-      sizes,
-      totalCost: cost,
-      status: "Completed",
-      finalizedDate: new Date().toDateString()
-    });
-
-    const pdfBase64 = generatePDFBase64(job, sizes, cost);
+  // --- 2. ACTIONS ---
+  
+  const handleNotifyCustomer = async (job) => {
+    // Send "Ready to Collect" Email
+    const confirm = window.confirm("Send 'Ready to Collect' email to customer?");
+    if(!confirm) return;
 
     try {
       await fetch('/.netlify/functions/sendReceipt', {
         method: 'POST',
         body: JSON.stringify({
-          name: job.name, email: job.email, jobId: job.id, pdfBase64
+          type: 'READY_NOTIFY', // New Flag for Backend
+          name: job.customerName,
+          email: job.customerEmail,
+          jobId: job.id
         })
       });
-      alert("Job Completed & Receipt Emailed!");
-    } catch (err) {
-      console.error(err);
-      alert("Saved, but Email failed.");
-    }
+      alert("Notification Sent!");
+    } catch(e) { alert("Email failed"); }
   };
 
-  // Filter Logic
-  const filteredJobs = allJobs.filter(job => {
-    if (filter === 'all') return true;
-    return job.status.toLowerCase() === filter;
-  });
+  const handleCompleteJob = async (job) => {
+    if(job.balance > 0 && !window.confirm(`Customer owes LKR ${job.balance}. Mark as paid & completed?`)) return;
+    
+    // Generate Final Receipt PDF
+    const pdfBase64 = generatePDFBase64(job, "FINAL");
+
+    await updateDoc(doc(db, "jobs", job.id), {
+      status: "Completed",
+      completedAt: serverTimestamp()
+    });
+
+    // Email Final Receipt
+    await fetch('/.netlify/functions/sendReceipt', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'RECEIPT',
+        name: job.customerName,
+        email: job.customerEmail,
+        jobId: job.id,
+        pdfBase64
+      })
+    });
+    alert("Job Completed!");
+  };
+
+  // --- 3. LOGIN SCREEN (Simple Version) ---
+  if (!userRole) {
+    return (
+      <div className="login-screen">
+        <div className="login-box">
+          <img src={COMPANY.logo} className="logo" alt="logo"/>
+          <h2>Studio Tracker V2.0</h2>
+          <button onClick={() => setUserRole('admin')} className="btn-admin">Admin Login</button>
+          <button onClick={() => setUserRole('staff')} className="btn-staff">Staff View</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="container dashboard-container">
-      <div className="brand-header">
-        <img src={COMPANY.logo} alt="Logo" className="logo" />
-        <h1>Studio Click Dashboard</h1>
-        <p>{COMPANY.address}</p>
+      {/* HEADER */}
+      <div className="header-v2">
+        <div style={{display:'flex', alignItems:'center', gap:'15px'}}>
+          <img src={COMPANY.logo} className="logo-small" />
+          <div>
+            <h2 style={{margin:0}}>Studio Dashboard</h2>
+            <span className="badge">{userRole.toUpperCase()} MODE</span>
+          </div>
+        </div>
+        <div style={{display:'flex', gap:'10px'}}>
+          {userRole === 'admin' && (
+            <button onClick={() => setShowJobModal(true)} className="btn-new">+ New Job</button>
+          )}
+          {userRole === 'admin' && (
+            <button onClick={() => setView('products')} className="btn-secondary">Products</button>
+          )}
+          <button onClick={() => setUserRole(null)} className="btn-logout">Logout</button>
+        </div>
       </div>
 
-      <div className="stats-grid">
-        <div className="stat-card"><h3>Total Jobs</h3><p>{stats.total}</p></div>
-        <div className="stat-card"><h3>Today's Jobs</h3><p>{stats.today}</p></div>
-        <div className="stat-card highlight"><h3>Today's Income</h3><p>LKR {stats.income}</p></div>
-      </div>
+      {/* PRODUCT MANAGER POPUP */}
+      {view === 'products' && <ProductManager onClose={() => setView('dashboard')} />}
 
-      {/* --- UPDATED FILTER BAR WITH COUNTS --- */}
-      <div className="filter-bar">
-        <button 
-          className={`filter-btn ${filter==='all' ? 'active':''}`} 
-          onClick={()=>setFilter('all')}
-        >
-          All Jobs ({totalCount})
-        </button>
-        
-        <button 
-          className={`filter-btn ${filter==='pending' ? 'active':''}`} 
-          onClick={()=>setFilter('pending')}
-        >
-          Pending ({pendingCount})
-        </button>
-        
-        <button 
-          className={`filter-btn ${filter==='completed' ? 'active':''}`} 
-          onClick={()=>setFilter('completed')}
-        >
-          Completed ({completedCount})
-        </button>
-      </div>
+      {/* NEW JOB MODAL */}
+      {showJobModal && (
+        <NewJobModal 
+          products={products} 
+          onClose={() => setShowJobModal(false)} 
+        />
+      )}
 
-      <div className="job-list">
-        {filteredJobs.length === 0 ? <p style={{textAlign:'center', color:'#888'}}>No jobs found in this category.</p> : null}
-        
-        {filteredJobs.map(job => (
-          <JobItem key={job.id} job={job} onSave={handleFinalize} />
+      {/* STATS (Admin Only) */}
+      {userRole === 'admin' && (
+        <div className="stats-grid">
+          <div className="stat-card"><h3>Total Jobs</h3><p>{stats.totalJobs}</p></div>
+          <div className="stat-card"><h3>Cash Income</h3><p>LKR {stats.cashIncome}</p></div>
+          <div className="stat-card"><h3>Card Income</h3><p>LKR {stats.cardIncome}</p></div>
+          <div className="stat-card highlight"><h3>Due Balance</h3><p>LKR {stats.dueBalance}</p></div>
+        </div>
+      )}
+
+      {/* JOB LIST */}
+      <div className="job-list-v2">
+        {jobs.map(job => (
+          <div key={job.id} className={`job-row-v2 ${job.status}`}>
+            <div className="job-date">
+              <span className="date-box">
+                {new Date(job.dueDate).getDate()} <br/>
+                <small>{new Date(job.dueDate).toLocaleString('default', { month: 'short' })}</small>
+              </span>
+            </div>
+            
+            <div className="job-info">
+              <div className="job-title">
+                <strong>{job.id}</strong> - {job.customerName}
+                {job.status === "Pending" && <span className="badge-pending">Processing</span>}
+                {job.status === "Completed" && <span className="badge-completed">Done</span>}
+              </div>
+              <div className="job-product">
+                {job.productName} ({job.productCode})
+              </div>
+              <div className="job-finance">
+                Total: {job.totalCost} | Paid: {job.advance} | 
+                <span style={{color: job.balance > 0 ? 'red' : 'green', fontWeight:'bold'}}>
+                  Due: {job.balance}
+                </span>
+              </div>
+            </div>
+
+            <div className="job-actions-v2">
+              {job.status !== "Completed" && (
+                <>
+                  <button onClick={() => handleNotifyCustomer(job)} className="btn-icon" title="Notify Ready">📧 Ready</button>
+                  {userRole === 'admin' && (
+                    <button onClick={() => handleCompleteJob(job)} className="btn-save">Finish</button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
         ))}
       </div>
     </div>
   );
 }
 
-function JobItem({ job, onSave }) {
-  const [sizes, setSizes] = useState(job.sizes || '');
-  const [cost, setCost] = useState(job.totalCost || '');
-  const isCompleted = job.status === "Completed";
+// --- NEW JOB MODAL COMPONENT ---
+function NewJobModal({ products, onClose }) {
+  const [formData, setFormData] = useState({
+    name: '', email: '', phone: '', dueDate: '',
+    productId: '', payMethod: 'Cash', advance: ''
+  });
 
-  const handlePrint = () => {
-    const doc = createPDFDoc(job, sizes, cost);
-    doc.autoPrint();
-    window.open(doc.output('bloburl'), '_blank');
+  const selectedProduct = products.find(p => p.id === formData.productId);
+
+  const handleSubmit = async () => {
+    if(!formData.name || !formData.productId) return alert("Details Missing");
+
+    await runTransaction(db, async (t) => {
+      const counterRef = doc(db, "counters", "jobCounter");
+      const counterDoc = await t.get(counterRef);
+      const newCount = (counterDoc.exists() ? counterDoc.data().current : 0) + 1;
+      const newId = `SC-${String(newCount).padStart(4, '0')}`;
+      t.set(counterRef, { current: newCount });
+
+      const total = Number(selectedProduct.price);
+      const adv = Number(formData.advance || 0);
+
+      t.set(doc(db, "jobs", newId), {
+        customerName: formData.name,
+        customerEmail: formData.email,
+        customerPhone: formData.phone,
+        dueDate: formData.dueDate,
+        productCode: selectedProduct.code,
+        productName: selectedProduct.name,
+        totalCost: total,
+        advance: adv,
+        balance: total - adv,
+        payMethod: formData.payMethod,
+        status: "Pending",
+        createdAt: serverTimestamp()
+      });
+    });
+    onClose();
   };
 
   return (
-    <div className={`job-row ${isCompleted ? 'row-completed' : 'row-pending'}`}>
-      
-      {/* INFO */}
-      <div className="row-info">
-        <div style={{display:'flex', alignItems:'center'}}>
-          <span className="job-id">{job.id}</span>
-          <span className="customer-name">{job.name}</span>
+    <div className="modal-overlay">
+      <div className="modal-content">
+        <h2>Create New Job</h2>
+        
+        <label>Customer Details</label>
+        <input placeholder="Name" onChange={e=>setFormData({...formData, name:e.target.value})} />
+        <input placeholder="Phone" onChange={e=>setFormData({...formData, phone:e.target.value})} />
+        <input placeholder="Email" type="email" onChange={e=>setFormData({...formData, email:e.target.value})} />
+
+        <label>Job Details</label>
+        <select onChange={e=>setFormData({...formData, productId:e.target.value})}>
+          <option value="">Select Product...</option>
+          {products.map(p => <option key={p.id} value={p.id}>{p.code} - {p.name} (LKR {p.price})</option>)}
+        </select>
+        <input type="date" onChange={e=>setFormData({...formData, dueDate:e.target.value})} />
+
+        <label>Payment</label>
+        <div style={{display:'flex', gap:'10px'}}>
+          <select onChange={e=>setFormData({...formData, payMethod:e.target.value})}>
+            <option>Cash</option><option>Card</option>
+          </select>
+          <input type="number" placeholder="Advance Amount" onChange={e=>setFormData({...formData, advance:e.target.value})} />
         </div>
-        <span className="customer-phone">{job.phone}</span>
-      </div>
 
-      {/* DETAILS */}
-      <div className="row-details">
-        {isCompleted ? (
-          <>
-            <span><strong>{job.sizes}</strong></span>
-            <span>LKR <strong>{job.totalCost}</strong></span>
-          </>
-        ) : (
-          <>
-            <input className="compact-input" placeholder="Sizes (4x6)" value={sizes} onChange={e=>setSizes(e.target.value)} />
-            <input className="compact-input" type="number" placeholder="Cost" value={cost} onChange={e=>setCost(e.target.value)} style={{maxWidth:'100px'}} />
-          </>
-        )}
-      </div>
-
-      {/* ACTIONS */}
-      <div className="row-actions">
-        <span className={`badge ${isCompleted ? 'badge-completed' : 'badge-pending'}`}>
-          {isCompleted ? "COMPLETED" : "PENDING"}
-        </span>
-
-        {!isCompleted && (
-          <button className="btn-save" onClick={() => onSave(job, sizes, cost)}>Save</button>
-        )}
-        <button className="btn-print" onClick={handlePrint} title="Print">🖨️</button>
+        <div style={{marginTop:'20px', display:'flex', gap:'10px'}}>
+          <button onClick={handleSubmit} className="btn-save">Create Job</button>
+          <button onClick={onClose} style={{background:'#ccc'}}>Cancel</button>
+        </div>
       </div>
     </div>
   );
 }
 
-// --- PDF HELPERS ---
-const createPDFDoc = (job, sizes, cost) => {
+// --- PDF HELPER (Updated for Logo) ---
+// Note: We need to convert the Logo URL to Base64 in a real app, 
+// but for now, we will assume the logo is loaded or skip it to prevent CORS errors.
+const generatePDFBase64 = (job, type) => {
   const doc = new jsPDF();
-  doc.setFontSize(22);
-  doc.text(COMPANY.name, 105, 20, null, null, "center");
-  doc.setFontSize(10);
-  doc.text(COMPANY.address, 105, 30, null, null, "center");
-  doc.text(`Tel: ${COMPANY.phone}`, 105, 35, null, null, "center");
-  doc.line(20, 40, 190, 40);
-
-  doc.setFontSize(16);
-  doc.text("OFFICIAL RECEIPT", 105, 55, null, null, "center");
-  doc.setFontSize(12);
-  doc.text(`Receipt No: #${job.id}`, 20, 70);
-  doc.text(`Date: ${new Date().toLocaleDateString()}`, 140, 70);
-
-  doc.setFillColor(245, 245, 245);
-  doc.rect(20, 80, 170, 25, "F");
-  doc.text(`Customer: ${job.name}`, 25, 90);
-  doc.text(`Phone: ${job.phone}`, 25, 98);
-
-  let y = 125;
-  doc.text("Description", 20, y);
-  doc.text("Amount", 160, y);
-  doc.line(20, y+2, 190, y+2);
-  
-  y += 15;
-  doc.text(`Photo Job (${sizes})`, 20, y);
-  doc.text(`LKR ${cost}.00`, 160, y);
-
-  y += 20;
-  doc.setFont(undefined, 'bold');
-  doc.text("TOTAL:", 120, y);
-  doc.text(`LKR ${cost}.00`, 160, y);
-
-  doc.setFont(undefined, 'normal');
-  doc.setFontSize(10);
-  doc.text("Thank you for choosing Studio Click!", 105, 180, null, null, "center");
-  return doc;
-};
-
-const generatePDFBase64 = (job, sizes, cost) => {
-  const doc = createPDFDoc(job, sizes, cost);
+  doc.text(COMPANY.name, 20, 20);
+  doc.text(`Receipt for ${job.id}`, 20, 30);
+  doc.text(`Total: ${job.totalCost}`, 20, 40);
+  doc.text(`Paid: ${job.advance}`, 20, 50);
+  doc.text(`Balance: ${job.balance}`, 20, 60);
   return btoa(doc.output()); 
 };
