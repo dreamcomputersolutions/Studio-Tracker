@@ -81,10 +81,66 @@ input[type=number] {
 .btn-icon { background: white; border: 1px solid #d1d5db; padding: 8px 12px; border-radius: 8px; cursor: pointer; }
 .btn-save { background: var(--primary); color: white; border: none; padding: 8px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; }
 
-/* Modal */
-.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 1000; }
-.modal-content { background: white; padding: 30px; border-radius: 16px; width: 90%; max-width: 500px; }
+/* --- MODAL / POPUP STYLING --- */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(3px);
+  display: flex; justify-content: center; align-items: center;
+  z-index: 1000;
+}
 
+.modal-content {
+  background: white;
+  padding: 30px;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  animation: slideUp 0.3s ease-out;
+  max-height: 90vh; /* Prevent it getting too tall */
+  overflow-y: auto; /* Scroll if needed */
+}
+
+.modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 10px;
+}
+.modal-header h2 { margin: 0; font-size: 1.5rem; color: var(--text-main); }
+.close-btn { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #999; }
+
+/* Form Fields inside Modal */
+.form-row { margin-bottom: 15px; }
+.form-row label { 
+  display: block; 
+  margin-bottom: 6px; 
+  font-weight: 600; 
+  font-size: 0.9rem; 
+  color: var(--text-main); 
+}
+.form-row input, .form-row select { 
+  width: 100%; 
+  padding: 12px; 
+  border: 1px solid #d1d5db; 
+  border-radius: 8px; 
+  box-sizing: border-box; 
+  font-family: inherit;
+  font-size: 1rem;
+}
+.form-row input:focus, .form-row select:focus {
+  outline: 2px solid var(--primary);
+  border-color: transparent;
+}
+
+/* Two columns for Payment row */
+.split-row { display: flex; gap: 15px; }
+.split-row > div { flex: 1; }
+
+/* Modal Footer Buttons */
+.modal-actions { margin-top: 25px; display: flex; gap: 10px; justify-content: flex-end; }
+.btn-cancel { background: #f3f4f6; color: var(--text-main); border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; }
+.btn-confirm { background: var(--primary); color: white; border: none; padding: 10px 25px; border-radius: 8px; font-weight: 600; cursor: pointer; }
+.btn-confirm:hover { background: var(--primary-hover); }
 /* Product Manager */
 .product-row { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #eee; }
 .btn-icon-del { background: #fee2e2; border: none; padding: 5px 10px; border-radius: 6px; cursor: pointer; }

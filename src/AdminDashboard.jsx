@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, updateDoc, addDoc, serverTimestamp, query, runTransaction } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, serverTimestamp, query, runTransaction } from 'firebase/firestore';
 import { db } from './firebase';
 import { jsPDF } from "jspdf";
 import ProductManager from './ProductManager';
@@ -16,7 +16,12 @@ export default function AdminDashboard() {
   const [view, setView] = useState('dashboard');
   const [jobs, setJobs] = useState([]);
   const [products, setProducts] = useState([]);
-  const [showJobModal, setShowJobModal] = useState(false);
+  
+  // Modal State
+  const [showModal, setShowModal] = useState(false);
+  const [editingJob, setEditingJob] = useState(null); // If null, we are creating new. If object, we are editing.
+
+  // Stats State
   const [stats, setStats] = useState({ totalJobs: 0, cashIncome: 0, cardIncome: 0, dueBalance: 0 });
 
   // --- 1. DATA FETCHING ---
@@ -29,31 +34,19 @@ export default function AdminDashboard() {
     // Jobs
     const unsubJobs = onSnapshot(collection(db, "jobs"), (snap) => {
       let data = snap.docs.map(d => ({...d.data(), id: d.id}));
-      
-      // Sort: Newest First
+      // Sort Newest First
       data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-      
       setJobs(data);
 
       // Calc Stats
       let cash = 0, card = 0, due = 0;
       data.forEach(job => {
-        // Handle V1 and V2 Data structures
-        const total = Number(job.totalCost || job.cost || 0);
-        const adv = Number(job.advance || 0);
+        const total = Number(job.totalCost || 0);
+        const paid = Number(job.advance || 0) + (job.status === "Completed" ? Number(job.balance || 0) : 0);
         
-        let paid = adv;
-        if (job.status === "Completed") {
-          // If completed, assume full payment unless balance exists
-          paid = total; 
-        }
-
         if(job.payMethod === "Cash") cash += paid;
         if(job.payMethod === "Card") card += paid;
-        
-        // Calculate Due
-        const balance = total - paid;
-        if(job.status !== "Completed" && balance > 0) due += balance;
+        if(job.status !== "Completed") due += Number(job.balance || 0);
       });
       setStats({ totalJobs: data.length, cashIncome: cash, cardIncome: card, dueBalance: due });
     });
@@ -62,68 +55,51 @@ export default function AdminDashboard() {
   }, []);
 
   // --- 2. ACTIONS ---
+  
+  // Open Modal for New Job
+  const handleNewJob = () => {
+    setEditingJob(null); // Clear editing state
+    setShowModal(true);
+  };
+
+  // Open Modal to Edit Existing Job
+  const handleEditJob = (job) => {
+    setEditingJob(job); // Load job data into modal
+    setShowModal(true);
+  };
+
   const handleNotifyCustomer = async (job) => {
     if(!confirm("Send 'Ready to Collect' email?")) return;
-    
-    // Fallback for V1 data
-    const cName = job.customerName || job.name;
-    const cEmail = job.customerEmail || job.email;
-
     try {
       await fetch('/.netlify/functions/sendReceipt', {
         method: 'POST',
-        body: JSON.stringify({
-          type: 'READY_NOTIFY',
-          name: cName,
-          email: cEmail,
-          jobId: job.id
-        })
+        body: JSON.stringify({ type: 'READY_NOTIFY', name: job.customerName, email: job.customerEmail, jobId: job.id })
       });
-      alert("Notification Email Sent!");
-    } catch(e) { alert("Email Failed"); console.error(e); }
+      alert("Email Sent!");
+    } catch(e) { alert("Failed"); }
   };
 
   const handleCompleteJob = async (job) => {
-    const total = Number(job.totalCost || job.cost || 0);
-    const adv = Number(job.advance || 0);
-    const balance = total - adv;
-
-    if(balance > 0 && !confirm(`Customer owes LKR ${balance}. Mark as Paid & Completed?`)) return;
-
-    // 1. Generate PDF String
-    const pdfBase64 = generatePDFBase64(job);
+    if(job.balance > 0 && !confirm(`Customer owes LKR ${job.balance}. Mark as Paid & Completed?`)) return;
     
-    // Fallback variables
-    const cName = job.customerName || job.name;
-    const cEmail = job.customerEmail || job.email;
+    // Generate PDF
+    const pdfBase64 = generatePDFBase64(job);
 
-    // 2. Update DB
     await updateDoc(doc(db, "jobs", job.id), {
       status: "Completed",
-      balance: 0, // Mark as fully paid
+      balance: 0, // Assume fully paid
       completedAt: serverTimestamp()
     });
 
-    // 3. Send Email
-    try {
-      await fetch('/.netlify/functions/sendReceipt', {
-        method: 'POST',
-        body: JSON.stringify({
-          type: 'RECEIPT',
-          name: cName,
-          email: cEmail,
-          jobId: job.id,
-          pdfBase64: pdfBase64
-        })
-      });
-      alert("Job Completed & Receipt Sent!");
-    } catch(e) { 
-      console.error(e);
-      alert("Job saved but Email failed."); 
-    }
+    // Send Final Receipt
+    fetch('/.netlify/functions/sendReceipt', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'RECEIPT', name: job.customerName, email: job.customerEmail, jobId: job.id, pdfBase64 })
+    });
+    alert("Completed!");
   };
 
-  // --- 3. LOGIN UI ---
+  // --- 3. LOGIN SCREEN ---
   if (!userRole) {
     return (
       <div className="login-screen">
@@ -137,9 +113,9 @@ export default function AdminDashboard() {
     );
   }
 
-  // --- 4. DASHBOARD UI ---
   return (
     <div className="container dashboard-container">
+      {/* HEADER */}
       <div className="header-v2">
         <div style={{display:'flex', alignItems:'center', gap:'15px'}}>
           <img src={COMPANY.logo} className="logo-small" />
@@ -151,7 +127,7 @@ export default function AdminDashboard() {
         <div style={{display:'flex', gap:'10px'}}>
           {userRole === 'admin' && (
             <>
-              <button onClick={() => setShowJobModal(true)} className="btn-new">+ New Job</button>
+              <button onClick={handleNewJob} className="btn-new">+ New Job</button>
               <button onClick={() => setView('products')} className="btn-secondary">Products</button>
             </>
           )}
@@ -159,10 +135,18 @@ export default function AdminDashboard() {
         </div>
       </div>
 
+      {/* POPUPS */}
       {view === 'products' && <ProductManager onClose={() => setView('dashboard')} />}
+      
+      {showModal && (
+        <JobModal 
+          job={editingJob} 
+          products={products} 
+          onClose={() => setShowModal(false)} 
+        />
+      )}
 
-      {showJobModal && <NewJobModal products={products} onClose={() => setShowJobModal(false)} />}
-
+      {/* STATS */}
       {userRole === 'admin' && (
         <div className="stats-grid">
           <div className="stat-card"><h3>Total Jobs</h3><p>{stats.totalJobs}</p></div>
@@ -172,15 +156,11 @@ export default function AdminDashboard() {
         </div>
       )}
 
+      {/* JOB LIST */}
       <div className="job-list-v2">
-        {jobs.length === 0 && <p style={{textAlign:'center'}}>No jobs found.</p>}
         {jobs.map(job => {
-          // DATA MAPPING (Handle Old vs New)
-          const name = job.customerName || job.name || "Unknown";
-          const product = job.productName || job.sizes || "Custom Service";
-          const total = job.totalCost || job.cost || 0;
-          const paid = job.advance || 0;
-          const due = (job.status === "Completed") ? 0 : (total - paid);
+          // Check if job is missing details (created by customer)
+          const isMissingDetails = !job.productCode || !job.totalCost;
 
           return (
             <div key={job.id} className={`job-row-v2 ${job.status}`}>
@@ -193,17 +173,20 @@ export default function AdminDashboard() {
               
               <div className="job-info">
                 <div className="job-title">
-                  <strong>{job.id}</strong> - {name}
+                  <strong>{job.id}</strong> - {job.customerName || job.name}
                   {job.status === "Pending" && <span className="badge-pending">Processing</span>}
                   {job.status === "Completed" && <span className="badge-completed">Done</span>}
                 </div>
                 <div className="job-product">
-                  {product} {job.productCode ? `(${job.productCode})` : ''}
+                  {isMissingDetails ? 
+                    <span style={{color:'red'}}>⚠ Waiting for Details</span> : 
+                    `${job.productName} (${job.productCode})`
+                  }
                 </div>
                 <div className="job-finance">
-                  Total: {total} | Paid: {paid} | 
-                  <span style={{color: due > 0 ? 'red' : 'green', fontWeight:'bold', marginLeft:'5px'}}>
-                    Due: {due}
+                  Total: {job.totalCost || 0} | Paid: {job.advance || 0} | 
+                  <span style={{color: job.balance > 0 ? 'red' : 'green', fontWeight:'bold', marginLeft:'5px'}}>
+                    Due: {job.balance || 0}
                   </span>
                 </div>
               </div>
@@ -211,7 +194,16 @@ export default function AdminDashboard() {
               <div className="job-actions-v2">
                 {job.status !== "Completed" && (
                   <>
-                    <button onClick={() => handleNotifyCustomer(job)} className="btn-icon">📧 Ready</button>
+                    {/* BUTTON 1: Add Details (If new) OR Notify (If in progress) */}
+                    {isMissingDetails ? (
+                      <button onClick={() => handleEditJob(job)} className="btn-edit" style={{background:'#8b5cf6', color:'white', border:'none', padding:'8px 12px', borderRadius:'8px', cursor:'pointer', fontWeight:'600'}}>
+                        ✎ Add Details
+                      </button>
+                    ) : (
+                      <button onClick={() => handleNotifyCustomer(job)} className="btn-icon">📧 Ready</button>
+                    )}
+
+                    {/* BUTTON 2: Finish */}
                     {userRole === 'admin' && (
                       <button onClick={() => handleCompleteJob(job)} className="btn-save">Finish</button>
                     )}
@@ -226,81 +218,157 @@ export default function AdminDashboard() {
   );
 }
 
-// --- NEW JOB MODAL ---
-function NewJobModal({ products, onClose }) {
+// --- UNIFIED JOB MODAL (Handles CREATE and EDIT) ---
+function JobModal({ job, products, onClose }) {
   const [formData, setFormData] = useState({
     name: '', email: '', phone: '', dueDate: '',
-    productId: '', payMethod: 'Cash', advance: ''
+    productId: '', payMethod: 'Cash', advance: '', totalCost: ''
   });
 
+  // Load Data if Editing
+  useEffect(() => {
+    if (job) {
+      // Find matching product ID based on code if needed, or just set raw values
+      const prod = products.find(p => p.code === job.productCode);
+      setFormData({
+        name: job.customerName || job.name || '',
+        email: job.customerEmail || job.email || '',
+        phone: job.customerPhone || job.phone || '',
+        dueDate: job.dueDate || '',
+        productId: prod ? prod.id : '',
+        payMethod: job.payMethod || 'Cash',
+        advance: job.advance || '',
+        totalCost: job.totalCost || ''
+      });
+    }
+  }, [job, products]);
+
+  // AUTO-UPDATE PRICE when Product Changes
+  useEffect(() => {
+    if (formData.productId) {
+      const prod = products.find(p => p.id === formData.productId);
+      if (prod) {
+        setFormData(prev => ({ ...prev, totalCost: prod.price }));
+      }
+    }
+  }, [formData.productId, products]);
+
   const handleSubmit = async () => {
-    if(!formData.name || !formData.productId) return alert("Please fill Name and Select Product");
-
-    const selectedProduct = products.find(p => p.id === formData.productId);
+    if(!formData.name) return alert("Customer Name is required");
     
-    await runTransaction(db, async (t) => {
-      const counterRef = doc(db, "counters", "jobCounter");
-      const counterDoc = await t.get(counterRef);
-      const newCount = (counterDoc.exists() ? counterDoc.data().current : 0) + 1;
-      const newId = `SC-${String(newCount).padStart(4, '0')}`;
-      t.set(counterRef, { current: newCount });
+    // Calculate Math
+    const total = Number(formData.totalCost || 0);
+    const adv = Number(formData.advance || 0);
+    const bal = total - adv;
+    
+    const selectedProduct = products.find(p => p.id === formData.productId);
+    const pName = selectedProduct ? selectedProduct.name : "Custom";
+    const pCode = selectedProduct ? selectedProduct.code : "CUST";
 
-      const total = Number(selectedProduct.price);
-      const adv = Number(formData.advance || 0);
-
-      t.set(doc(db, "jobs", newId), {
+    if (job) {
+      // --- UPDATE EXISTING JOB ---
+      await updateDoc(doc(db, "jobs", job.id), {
         customerName: formData.name,
         customerEmail: formData.email,
         customerPhone: formData.phone,
         dueDate: formData.dueDate,
-        productCode: selectedProduct.code,
-        productName: selectedProduct.name,
+        productCode: pCode,
+        productName: pName,
         totalCost: total,
         advance: adv,
-        balance: total - adv,
+        balance: bal,
         payMethod: formData.payMethod,
-        status: "Pending",
-        createdAt: serverTimestamp()
       });
-    });
+      alert("Job Updated!");
+    } else {
+      // --- CREATE NEW JOB ---
+      await runTransaction(db, async (t) => {
+        const counterRef = doc(db, "counters", "jobCounter");
+        const counterDoc = await t.get(counterRef);
+        const newCount = (counterDoc.exists() ? counterDoc.data().current : 0) + 1;
+        const newId = `SC-${String(newCount).padStart(4, '0')}`;
+        t.set(counterRef, { current: newCount });
+
+        t.set(doc(db, "jobs", newId), {
+          customerName: formData.name,
+          customerEmail: formData.email,
+          customerPhone: formData.phone,
+          dueDate: formData.dueDate,
+          productCode: pCode,
+          productName: pName,
+          totalCost: total,
+          advance: adv,
+          balance: bal,
+          payMethod: formData.payMethod,
+          status: "Pending",
+          createdAt: serverTimestamp()
+        });
+      });
+      alert("Job Created!");
+    }
     onClose();
   };
 
   return (
     <div className="modal-overlay">
       <div className="modal-content">
-        <h2>Create New Job</h2>
-        <div style={{marginBottom:'10px'}}>
+        <div className="modal-header">
+          <h2>{job ? `Edit Job: ${job.id}` : "Create New Job"}</h2>
+          <button className="close-btn" onClick={onClose}>&times;</button>
+        </div>
+        
+        <div className="form-row">
           <label>Customer Name</label>
-          <input onChange={e=>setFormData({...formData, name:e.target.value})} placeholder="John Doe"/>
+          <input value={formData.name} onChange={e=>setFormData({...formData, name:e.target.value})} />
         </div>
-        <div style={{marginBottom:'10px'}}>
-          <label>Email</label>
-          <input type="email" onChange={e=>setFormData({...formData, email:e.target.value})} placeholder="email@example.com"/>
+        <div className="split-row">
+          <div className="form-row">
+            <label>Email</label>
+            <input type="email" value={formData.email} onChange={e=>setFormData({...formData, email:e.target.value})} />
+          </div>
+          <div className="form-row">
+            <label>Phone</label>
+            <input value={formData.phone} onChange={e=>setFormData({...formData, phone:e.target.value})} />
+          </div>
         </div>
-        <div style={{marginBottom:'10px'}}>
+
+        <div className="form-row">
           <label>Select Product</label>
-          <select onChange={e=>setFormData({...formData, productId:e.target.value})}>
-            <option value="">-- Select --</option>
-            {products.map(p => <option key={p.id} value={p.id}>{p.code} - {p.name} ({p.price})</option>)}
+          <select value={formData.productId} onChange={e=>setFormData({...formData, productId:e.target.value})}>
+            <option value="">-- Select Product --</option>
+            {products.map(p => <option key={p.id} value={p.id}>{p.code} - {p.name}</option>)}
           </select>
         </div>
-        <div style={{marginBottom:'10px'}}>
-          <label>Due Date</label>
-          <input type="date" onChange={e=>setFormData({...formData, dueDate:e.target.value})} />
+
+        <div className="split-row">
+           <div className="form-row">
+            <label>Due Date</label>
+            <input type="date" value={formData.dueDate} onChange={e=>setFormData({...formData, dueDate:e.target.value})} />
+          </div>
+          <div className="form-row">
+            <label>Total Amount (LKR)</label>
+            {/* Auto-populated but editable */}
+            <input type="number" value={formData.totalCost} onChange={e=>setFormData({...formData, totalCost:e.target.value})} />
+          </div>
         </div>
         
-        <label>Payment (Advance)</label>
-        <div style={{display:'flex', gap:'10px'}}>
-          <select onChange={e=>setFormData({...formData, payMethod:e.target.value})}>
-            <option>Cash</option><option>Card</option>
-          </select>
-          <input type="number" placeholder="Amount Paid" onChange={e=>setFormData({...formData, advance:e.target.value})} />
+        <label style={{fontWeight:'bold', display:'block', marginBottom:'5px'}}>Payment (Advance)</label>
+        <div className="split-row">
+          <div className="form-row">
+            <select value={formData.payMethod} onChange={e=>setFormData({...formData, payMethod:e.target.value})}>
+              <option>Cash</option><option>Card</option>
+            </select>
+          </div>
+          <div className="form-row">
+            <input type="number" placeholder="Amount Paid" value={formData.advance} onChange={e=>setFormData({...formData, advance:e.target.value})} />
+          </div>
         </div>
         
-        <div style={{marginTop:'20px', display:'flex', gap:'10px'}}>
-          <button onClick={handleSubmit} className="btn-save">Create</button>
-          <button onClick={onClose} style={{background:'#ccc', border:'none', padding:'10px', borderRadius:'8px', cursor:'pointer'}}>Cancel</button>
+        <div className="modal-actions">
+          <button onClick={onClose} className="btn-cancel">Cancel</button>
+          <button onClick={handleSubmit} className="btn-confirm">
+            {job ? "Update Job" : "Create Job"}
+          </button>
         </div>
       </div>
     </div>
@@ -311,8 +379,7 @@ function NewJobModal({ products, onClose }) {
 const generatePDFBase64 = (job) => {
   const doc = new jsPDF();
   const cName = job.customerName || job.name || "Customer";
-  const cProduct = job.productName || job.sizes || "Service";
-  const total = Number(job.totalCost || job.cost || 0);
+  const total = Number(job.totalCost || 0);
   const paid = Number(job.advance || 0);
 
   doc.setFontSize(20);
@@ -336,15 +403,12 @@ const generatePDFBase64 = (job) => {
   doc.line(20, y+2, 190, y+2);
   y += 15;
   
-  doc.text(cProduct, 20, y);
+  doc.text(`${job.productName || "Service"}`, 20, y);
   doc.text(`${total}.00`, 160, y);
   
   y += 20;
-  doc.text(`Advance Paid:`, 100, y);
-  doc.text(`${paid}.00`, 160, y);
-  y += 10;
-  doc.text(`Balance Paid:`, 100, y);
-  doc.text(`${total - paid}.00`, 160, y);
+  doc.text(`Paid:`, 100, y);
+  doc.text(`${job.balance === 0 ? total : paid}.00`, 160, y);
   
   doc.setFont(undefined, 'bold');
   y += 15;
