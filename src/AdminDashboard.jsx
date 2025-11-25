@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { 
   collection, onSnapshot, doc, updateDoc, deleteDoc, 
-  serverTimestamp, runTransaction, getDoc 
+  serverTimestamp, query, runTransaction, getDoc 
 } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 import { db, auth } from './firebase';
@@ -16,7 +16,6 @@ const COMPANY = {
 };
 
 export default function AdminDashboard() {
-  // --- STATE ---
   const [user, setUser] = useState(null);
   const [userRole, setUserRole] = useState(null); 
   const [loading, setLoading] = useState(true);
@@ -72,7 +71,6 @@ export default function AdminDashboard() {
       data.forEach(job => {
         const total = Number(job.totalCost || 0);
         const paid = Number(job.advance || 0) + (job.status === "Completed" ? Number(job.balance || 0) : 0);
-        
         if(job.payMethod === "Cash") cash += paid;
         if(job.payMethod === "Card") card += paid;
         if(job.status !== "Completed") due += Number(job.balance || 0);
@@ -93,15 +91,34 @@ export default function AdminDashboard() {
   const handleEditJob = (job) => { setEditingJob(job); setShowModal(true); };
   const handleDeleteJob = async (id) => { if(confirm("Permanently delete this job?")) await deleteDoc(doc(db, "jobs", id)); };
 
+  // PRINT HANDLER
+  const handlePrintJob = async (job) => {
+    const pdfBase64 = await generatePDFBase64(job);
+    // Convert Base64 to Blob to open in new tab
+    const byteCharacters = atob(pdfBase64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], {type: 'application/pdf'});
+    const blobUrl = URL.createObjectURL(blob);
+    window.open(blobUrl, '_blank');
+  };
+
   const handleMarkReady = async (job) => {
-    if(!confirm("Mark as DONE and Notify Customer?")) return;
+    if(!confirm("Mark as DONE? (Email will sort if exists)")) return;
     try {
       await updateDoc(doc(db, "jobs", job.id), { status: "Ready" });
-      await fetch('/.netlify/functions/sendReceipt', {
-        method: 'POST',
-        body: JSON.stringify({ type: 'READY_NOTIFY', name: job.customerName || job.name, email: job.customerEmail || job.email, jobId: job.id })
-      });
-      alert("Marked Ready & Email Sent!");
+      
+      // Only send email if email exists
+      if(job.customerEmail) {
+        await fetch('/.netlify/functions/sendReceipt', {
+          method: 'POST',
+          body: JSON.stringify({ type: 'READY_NOTIFY', name: job.customerName || job.name, email: job.customerEmail || job.email, jobId: job.id })
+        });
+      }
+      alert("Status Updated!");
     } catch(e) { alert("Saved, but Email failed."); }
   };
 
@@ -109,10 +126,13 @@ export default function AdminDashboard() {
     if(job.balance > 0 && !confirm(`Collect LKR ${job.balance}. Mark Paid?`)) return;
     const pdfBase64 = await generatePDFBase64(job);
     await updateDoc(doc(db, "jobs", job.id), { status: "Completed", balance: 0, completedAt: serverTimestamp() });
-    fetch('/.netlify/functions/sendReceipt', {
-      method: 'POST',
-      body: JSON.stringify({ type: 'RECEIPT', name: job.customerName || job.name, email: job.customerEmail || job.email, jobId: job.id, pdfBase64 })
-    });
+    
+    if(job.customerEmail) {
+      fetch('/.netlify/functions/sendReceipt', {
+        method: 'POST',
+        body: JSON.stringify({ type: 'RECEIPT', name: job.customerName || job.name, email: job.customerEmail || job.email, jobId: job.id, pdfBase64 })
+      });
+    }
     alert("Job Closed!");
   };
 
@@ -199,6 +219,9 @@ export default function AdminDashboard() {
                 <div className="job-finance">Total: {job.totalCost || 0} | Paid: {job.advance || 0} | <span style={{color: job.balance > 0 ? 'red' : 'green', fontWeight:'bold', marginLeft:'5px'}}>Due: {job.balance || 0}</span></div>
               </div>
               <div className="job-actions-v2">
+                {/* PRINT BUTTON - ALWAYS VISIBLE */}
+                <button onClick={() => handlePrintJob(job)} className="btn-icon" title="Print Receipt">🖨️</button>
+
                 {userRole === 'admin' && <button onClick={() => handleEditJob(job)} className="btn-edit">{isMissingDetails ? "Add Details" : "Edit"}</button>}
                 {!isMissingDetails && job.status === "Pending" && <button onClick={() => handleMarkReady(job)} className="btn-ready">✔ Mark Done</button>}
                 {userRole === 'admin' && job.status !== "Completed" && !isMissingDetails && <button onClick={() => handleCompleteJob(job)} className="btn-save">Finish & Pay</button>}
@@ -212,12 +235,12 @@ export default function AdminDashboard() {
   );
 }
 
-// --- JOB MODAL (DYNAMIC PAYMENT SECTION) ---
+// --- JOB MODAL ---
 function JobModal({ job, products, onClose }) {
   const [formData, setFormData] = useState({
     name: '', email: '', phone: '', dueDate: '',
     productId: '', payMethod: 'Cash', advance: '', totalCost: '', description: '',
-    paymentType: 'advance' // 'unpaid', 'advance', 'full'
+    paymentType: 'advance'
   });
 
   useEffect(() => {
@@ -226,7 +249,6 @@ function JobModal({ job, products, onClose }) {
       const total = Number(job.totalCost || 0);
       const adv = Number(job.advance || 0);
       
-      // Determine initial payment status for the UI
       let pType = 'advance';
       if (adv === 0) pType = 'unpaid';
       else if (adv >= total) pType = 'full';
@@ -246,7 +268,6 @@ function JobModal({ job, products, onClose }) {
     }
   }, [job, products]);
 
-  // Auto-Fill Description & Price
   useEffect(() => {
     if (formData.productId) {
       const prod = products.find(p => p.id === formData.productId);
@@ -260,7 +281,6 @@ function JobModal({ job, products, onClose }) {
     }
   }, [formData.productId]);
 
-  // Auto-Calculate Advance based on Type
   useEffect(() => {
     if (formData.paymentType === 'full') {
       setFormData(prev => ({ ...prev, advance: prev.totalCost }));
@@ -268,6 +288,9 @@ function JobModal({ job, products, onClose }) {
       setFormData(prev => ({ ...prev, advance: 0 }));
     }
   }, [formData.paymentType, formData.totalCost]);
+
+  // CALCULATE BALANCE LIVE
+  const liveBalance = Number(formData.totalCost || 0) - Number(formData.advance || 0);
 
   const saveJobLogic = async (sendEmail) => {
     if(!formData.name) return alert("Name required");
@@ -311,17 +334,11 @@ function JobModal({ job, products, onClose }) {
       });
     }
 
-    if (sendEmail) {
+    if (sendEmail && formData.email) {
       const pdfBase64 = await generatePDFBase64({ ...jobData, id: updatedJobId });
       await fetch('/.netlify/functions/sendReceipt', {
         method: 'POST',
-        body: JSON.stringify({
-          type: 'JOB_UPDATED',
-          name: formData.name,
-          email: formData.email,
-          jobId: updatedJobId,
-          pdfBase64: pdfBase64
-        })
+        body: JSON.stringify({ type: 'JOB_UPDATED', name: formData.name, email: formData.email, jobId: updatedJobId, pdfBase64 })
       });
       alert("Saved & Email Sent!");
     } else {
@@ -336,7 +353,7 @@ function JobModal({ job, products, onClose }) {
         <div className="modal-header"><h2>{job ? `Edit Job: ${job.id}` : "Create New Job"}</h2><button className="close-btn" onClick={onClose}>&times;</button></div>
         <div className="form-row"><label>Customer Name</label><input value={formData.name} onChange={e=>setFormData({...formData, name:e.target.value})} /></div>
         <div className="split-row">
-          <div className="form-row"><label>Email</label><input type="email" value={formData.email} onChange={e=>setFormData({...formData, email:e.target.value})} /></div>
+          <div className="form-row"><label>Email (Optional)</label><input type="email" value={formData.email} onChange={e=>setFormData({...formData, email:e.target.value})} /></div>
           <div className="form-row"><label>Phone</label><input value={formData.phone} onChange={e=>setFormData({...formData, phone:e.target.value})} /></div>
         </div>
         <div className="form-row"><label>Select Product</label><select value={formData.productId} onChange={e=>setFormData({...formData, productId:e.target.value})}><option value="">-- Select --</option>{products.map(p => <option key={p.id} value={p.id}>{p.code} - {p.name}</option>)}</select></div>
@@ -346,34 +363,43 @@ function JobModal({ job, products, onClose }) {
            <div className="form-row"><label>Total (LKR)</label><input type="number" value={formData.totalCost} onChange={e=>setFormData({...formData, totalCost:e.target.value})} /></div>
         </div>
         
-        {/* DYNAMIC PAYMENT SECTION */}
+        {/* AUTOMATED PAYMENT SECTION */}
         <label style={{fontWeight:'bold', marginTop:'10px', display:'block'}}>Payment Details</label>
         <div style={{background:'#f9fafb', padding:'10px', borderRadius:'8px', border:'1px solid #eee', marginBottom:'20px'}}>
-          <div className="form-row">
-            <label>Payment Status</label>
-            <select value={formData.paymentType} onChange={e=>setFormData({...formData, paymentType:e.target.value})}>
-              <option value="unpaid">Unpaid (No Payment Now)</option>
-              <option value="advance">Advance Payment</option>
-              <option value="full">Full Payment</option>
-            </select>
+          <div className="split-row">
+            <div className="form-row">
+              <label>Payment Status</label>
+              <select value={formData.paymentType} onChange={e=>setFormData({...formData, paymentType:e.target.value})}>
+                <option value="unpaid">Unpaid (0)</option>
+                <option value="advance">Advance</option>
+                <option value="full">Fully Paid</option>
+              </select>
+            </div>
+            {/* BALANCE DISPLAY */}
+            <div className="form-row">
+              <label>Balance Remaining</label>
+              <div style={{fontWeight:'bold', color: liveBalance > 0 ? 'red' : 'green', padding:'10px', border:'1px solid #ddd', borderRadius:'6px', background:'#fff'}}>
+                LKR {liveBalance}
+              </div>
+            </div>
           </div>
 
           {/* Only show these if NOT Unpaid */}
           {formData.paymentType !== 'unpaid' && (
             <div className="split-row">
               <div className="form-row">
-                <label>Payment Method</label>
+                <label>Method</label>
                 <select value={formData.payMethod} onChange={e=>setFormData({...formData, payMethod:e.target.value})}>
                   <option>Cash</option><option>Card</option>
                 </select>
               </div>
               <div className="form-row">
-                <label>Amount Paying Now</label>
+                <label>Paying Now</label>
                 <input 
                   type="number" 
                   value={formData.advance} 
                   onChange={e=>setFormData({...formData, advance:e.target.value})}
-                  disabled={formData.paymentType === 'full'} // Auto-locked if full
+                  disabled={formData.paymentType === 'full'} 
                   style={{background: formData.paymentType === 'full' ? '#eef' : 'white'}}
                 />
               </div>
@@ -403,7 +429,7 @@ const generatePDFBase64 = async (job) => {
   if(job.description) { y += 7; doc.setFontSize(9); doc.setTextColor(100); doc.text(`Note: ${job.description}`, 20, y); doc.setFontSize(11); doc.setTextColor(0); y += 3; }
   doc.line(15, y+5, 195, y+5);
   y += 15; doc.text("Sub Total:", 120, y); doc.text(`${Number(job.totalCost).toFixed(2)}`, 160, y);
-  y += 10; doc.text("Advance Paid:", 120, y); doc.text(`- ${Number(job.advance).toFixed(2)}`, 160, y);
+  y += 10; doc.text("Paid:", 120, y); doc.text(`- ${Number(job.advance).toFixed(2)}`, 160, y);
   y += 15; doc.setFont(undefined, 'bold'); doc.setFontSize(14);
   const bal = Number(job.balance) > 0 ? Number(job.balance) : 0;
   if (bal === 0) { doc.setTextColor(0, 150, 0); doc.text("FULLY PAID", 120, y); } else { doc.setTextColor(200, 0, 0); doc.text("BALANCE DUE:", 120, y); doc.text(`${bal.toFixed(2)}`, 165, y); }

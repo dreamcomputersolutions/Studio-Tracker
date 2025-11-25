@@ -27,7 +27,7 @@ export default function CustomerForm() {
           createdAt: serverTimestamp()
         });
       });
-      alert(`Registration Successful!`);
+      alert(`Registration Successful! Please take a seat.`);
       setFormData({ name: '', email: '', phone: '' });
     } catch (err) { alert("Error."); }
     setLoading(false);
@@ -51,9 +51,11 @@ export default function CustomerForm() {
         </div>
         
         <div style={{marginBottom:'15px'}}>
-          <label style={{display:'block', marginBottom:'5px', fontWeight:'600'}}>Email Address</label>
+          <label style={{display:'block', marginBottom:'5px', fontWeight:'600'}}>Email Address (Optional)</label>
           <input 
-            type="email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} required 
+            type="email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} 
+            // REMOVED 'required' HERE
+            placeholder="name@example.com"
             style={{width:'100%', padding:'12px', border:'1px solid #ccc', borderRadius:'8px', boxSizing:'border-box'}}
           />
         </div>
