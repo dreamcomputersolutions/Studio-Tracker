@@ -28,8 +28,12 @@ export default function AdminDashboard() {
   const [filter, setFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   
-  const [showModal, setShowModal] = useState(false);
+  // Modals
+  const [showModal, setShowModal] = useState(false); // Create/Edit Modal
   const [editingJob, setEditingJob] = useState(null);
+  
+  const [showPaymentModal, setShowPaymentModal] = useState(false); // NEW: Payment Modal
+  const [paymentJob, setPaymentJob] = useState(null); // Job being paid
 
   const [stats, setStats] = useState({ totalJobs: 0, cashIncome: 0, cardIncome: 0, dueBalance: 0 });
 
@@ -56,7 +60,7 @@ export default function AdminDashboard() {
     return unsubscribe;
   }, []);
 
-  // --- DATA ---
+  // --- DATA & STATS ---
   useEffect(() => {
     if (!user) return;
     const unsubProd = onSnapshot(collection(db, "products"), (snap) => {
@@ -67,14 +71,32 @@ export default function AdminDashboard() {
       data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
       setJobs(data);
 
+      // --- ADVANCED STATS CALCULATION ---
       let cash = 0, card = 0, due = 0;
+      
       data.forEach(job => {
         const total = Number(job.totalCost || 0);
-        const paid = Number(job.advance || 0) + (job.status === "Completed" ? Number(job.balance || 0) : 0);
-        if(job.payMethod === "Cash") cash += paid;
-        if(job.payMethod === "Card") card += paid;
-        if(job.status !== "Completed") due += Number(job.balance || 0);
+        const advance = Number(job.advance || 0);
+        const balance = total - advance; // Original balance amount
+
+        // 1. Add Advance Payment
+        if (job.payMethod === 'Cash') cash += advance;
+        if (job.payMethod === 'Card') card += advance;
+
+        // 2. Add Balance Payment (If Completed)
+        if (job.status === 'Completed') {
+          // The balance was paid. Check how it was paid.
+          // If balancePayMethod is missing (old jobs), assume same as initial or Cash.
+          const finalPayMethod = job.balancePayMethod || 'Cash'; 
+          
+          if (finalPayMethod === 'Cash') cash += balance;
+          if (finalPayMethod === 'Card') card += balance;
+        } else {
+          // Job not done, add to Due
+          due += balance;
+        }
       });
+      
       setStats({ totalJobs: data.length, cashIncome: cash, cardIncome: card, dueBalance: due });
     });
     return () => { unsubProd(); unsubJobs(); };
@@ -91,15 +113,12 @@ export default function AdminDashboard() {
   const handleEditJob = (job) => { setEditingJob(job); setShowModal(true); };
   const handleDeleteJob = async (id) => { if(confirm("Permanently delete this job?")) await deleteDoc(doc(db, "jobs", id)); };
 
-  // PRINT HANDLER
+  // PRINT
   const handlePrintJob = async (job) => {
     const pdfBase64 = await generatePDFBase64(job);
-    // Convert Base64 to Blob to open in new tab
     const byteCharacters = atob(pdfBase64);
     const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
+    for (let i = 0; i < byteCharacters.length; i++) { byteNumbers[i] = byteCharacters.charCodeAt(i); }
     const byteArray = new Uint8Array(byteNumbers);
     const blob = new Blob([byteArray], {type: 'application/pdf'});
     const blobUrl = URL.createObjectURL(blob);
@@ -107,25 +126,41 @@ export default function AdminDashboard() {
   };
 
   const handleMarkReady = async (job) => {
-    if(!confirm("Mark as DONE? (Email will sort if exists)")) return;
+    if(!confirm("Mark as DONE and Notify Customer?")) return;
     try {
       await updateDoc(doc(db, "jobs", job.id), { status: "Ready" });
-      
-      // Only send email if email exists
       if(job.customerEmail) {
         await fetch('/.netlify/functions/sendReceipt', {
           method: 'POST',
           body: JSON.stringify({ type: 'READY_NOTIFY', name: job.customerName || job.name, email: job.customerEmail || job.email, jobId: job.id })
         });
       }
-      alert("Status Updated!");
+      alert("Marked Ready & Email Sent!");
     } catch(e) { alert("Saved, but Email failed."); }
   };
 
-  const handleCompleteJob = async (job) => {
-    if(job.balance > 0 && !confirm(`Collect LKR ${job.balance}. Mark Paid?`)) return;
+  // --- TRIGGER PAYMENT MODAL ---
+  const initCompleteJob = (job) => {
+    if (job.balance <= 0) {
+      // No balance? Just finish it.
+      finishJob(job, 'None'); 
+    } else {
+      // Has balance? Open Payment Modal.
+      setPaymentJob(job);
+      setShowPaymentModal(true);
+    }
+  };
+
+  // --- FINAL DB UPDATE ---
+  const finishJob = async (job, balanceMethod) => {
     const pdfBase64 = await generatePDFBase64(job);
-    await updateDoc(doc(db, "jobs", job.id), { status: "Completed", balance: 0, completedAt: serverTimestamp() });
+    
+    await updateDoc(doc(db, "jobs", job.id), { 
+      status: "Completed", 
+      balance: 0, // Clear balance visually in DB
+      balancePayMethod: balanceMethod, // Record how balance was paid
+      completedAt: serverTimestamp() 
+    });
     
     if(job.customerEmail) {
       fetch('/.netlify/functions/sendReceipt', {
@@ -133,7 +168,9 @@ export default function AdminDashboard() {
         body: JSON.stringify({ type: 'RECEIPT', name: job.customerName || job.name, email: job.customerEmail || job.email, jobId: job.id, pdfBase64 })
       });
     }
-    alert("Job Closed!");
+    alert("Job Closed & Payment Recorded!");
+    setShowPaymentModal(false);
+    setPaymentJob(null);
   };
 
   const filteredJobs = jobs.filter(job => {
@@ -180,6 +217,15 @@ export default function AdminDashboard() {
 
       {view === 'products' && <ProductManager onClose={() => setView('dashboard')} />}
       {showModal && <JobModal job={editingJob} products={products} onClose={() => setShowModal(false)} />}
+      
+      {/* PAYMENT MODAL */}
+      {showPaymentModal && paymentJob && (
+        <PaymentModal 
+          job={paymentJob} 
+          onClose={() => setShowPaymentModal(false)} 
+          onConfirm={(method) => finishJob(paymentJob, method)} 
+        />
+      )}
 
       {userRole === 'admin' && (
         <div className="stats-grid">
@@ -219,12 +265,15 @@ export default function AdminDashboard() {
                 <div className="job-finance">Total: {job.totalCost || 0} | Paid: {job.advance || 0} | <span style={{color: job.balance > 0 ? 'red' : 'green', fontWeight:'bold', marginLeft:'5px'}}>Due: {job.balance || 0}</span></div>
               </div>
               <div className="job-actions-v2">
-                {/* PRINT BUTTON - ALWAYS VISIBLE */}
                 <button onClick={() => handlePrintJob(job)} className="btn-icon" title="Print Receipt">🖨️</button>
-
                 {userRole === 'admin' && <button onClick={() => handleEditJob(job)} className="btn-edit">{isMissingDetails ? "Add Details" : "Edit"}</button>}
                 {!isMissingDetails && job.status === "Pending" && <button onClick={() => handleMarkReady(job)} className="btn-ready">✔ Mark Done</button>}
-                {userRole === 'admin' && job.status !== "Completed" && !isMissingDetails && <button onClick={() => handleCompleteJob(job)} className="btn-save">Finish & Pay</button>}
+                
+                {/* TRIGGER PAYMENT MODAL */}
+                {userRole === 'admin' && job.status !== "Completed" && !isMissingDetails && (
+                  <button onClick={() => initCompleteJob(job)} className="btn-save">Finish & Pay</button>
+                )}
+                
                 {userRole === 'admin' && <button onClick={() => handleDeleteJob(job.id)} className="btn-icon-del" title="Delete">🗑️</button>}
               </div>
             </div>
@@ -235,12 +284,50 @@ export default function AdminDashboard() {
   );
 }
 
-// --- JOB MODAL ---
+// --- NEW: PAYMENT COLLECTION MODAL ---
+function PaymentModal({ job, onClose, onConfirm }) {
+  const [method, setMethod] = useState('Cash');
+  const balance = Number(job.balance || 0);
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal-content" style={{textAlign:'center', maxWidth:'400px'}}>
+        <h2 style={{margin:0}}>Collect Balance</h2>
+        <p style={{color:'#666', margin:'10px 0 20px 0'}}>Job: <strong>{job.id}</strong></p>
+        
+        <div style={{background:'#fef2f2', padding:'15px', borderRadius:'10px', marginBottom:'20px', border:'1px solid #fee2e2'}}>
+          <span style={{display:'block', fontSize:'0.9rem', color:'#b91c1c'}}>Amount Due</span>
+          <span style={{display:'block', fontSize:'2rem', fontWeight:'bold', color:'#ef4444'}}>LKR {balance}</span>
+        </div>
+
+        <label style={{display:'block', textAlign:'left', marginBottom:'5px'}}>Payment Method</label>
+        <select 
+          value={method} onChange={(e)=>setMethod(e.target.value)}
+          style={{width:'100%', padding:'12px', fontSize:'1.1rem', marginBottom:'20px', border:'1px solid #ccc', borderRadius:'8px'}}
+        >
+          <option value="Cash">Cash</option>
+          <option value="Card">Card</option>
+        </select>
+
+        <div className="modal-actions" style={{justifyContent:'center'}}>
+          <button onClick={onClose} className="btn-cancel" style={{width:'100px'}}>Cancel</button>
+          <button onClick={() => onConfirm(method)} className="btn-confirm" style={{width:'150px'}}>Confirm Paid</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ... (JobModal & generatePDFBase64 stay exactly the same as before) ...
+// To save space, please copy them from the previous response or your existing file.
+// They are just standard components.
+// ---------------------------------------------------------
+// --- JOB MODAL (DYNAMIC PAYMENT SECTION) ---
 function JobModal({ job, products, onClose }) {
   const [formData, setFormData] = useState({
     name: '', email: '', phone: '', dueDate: '',
     productId: '', payMethod: 'Cash', advance: '', totalCost: '', description: '',
-    paymentType: 'advance'
+    paymentType: 'advance' // 'unpaid', 'advance', 'full'
   });
 
   useEffect(() => {
@@ -249,6 +336,7 @@ function JobModal({ job, products, onClose }) {
       const total = Number(job.totalCost || 0);
       const adv = Number(job.advance || 0);
       
+      // Determine initial payment status for the UI
       let pType = 'advance';
       if (adv === 0) pType = 'unpaid';
       else if (adv >= total) pType = 'full';
@@ -268,6 +356,7 @@ function JobModal({ job, products, onClose }) {
     }
   }, [job, products]);
 
+  // Auto-Fill Description & Price
   useEffect(() => {
     if (formData.productId) {
       const prod = products.find(p => p.id === formData.productId);
@@ -281,6 +370,7 @@ function JobModal({ job, products, onClose }) {
     }
   }, [formData.productId]);
 
+  // Auto-Calculate Advance based on Type
   useEffect(() => {
     if (formData.paymentType === 'full') {
       setFormData(prev => ({ ...prev, advance: prev.totalCost }));
@@ -289,7 +379,6 @@ function JobModal({ job, products, onClose }) {
     }
   }, [formData.paymentType, formData.totalCost]);
 
-  // CALCULATE BALANCE LIVE
   const liveBalance = Number(formData.totalCost || 0) - Number(formData.advance || 0);
 
   const saveJobLogic = async (sendEmail) => {
@@ -338,7 +427,13 @@ function JobModal({ job, products, onClose }) {
       const pdfBase64 = await generatePDFBase64({ ...jobData, id: updatedJobId });
       await fetch('/.netlify/functions/sendReceipt', {
         method: 'POST',
-        body: JSON.stringify({ type: 'JOB_UPDATED', name: formData.name, email: formData.email, jobId: updatedJobId, pdfBase64 })
+        body: JSON.stringify({
+          type: 'JOB_UPDATED',
+          name: formData.name,
+          email: formData.email,
+          jobId: updatedJobId,
+          pdfBase64: pdfBase64
+        })
       });
       alert("Saved & Email Sent!");
     } else {
@@ -363,7 +458,6 @@ function JobModal({ job, products, onClose }) {
            <div className="form-row"><label>Total (LKR)</label><input type="number" value={formData.totalCost} onChange={e=>setFormData({...formData, totalCost:e.target.value})} /></div>
         </div>
         
-        {/* AUTOMATED PAYMENT SECTION */}
         <label style={{fontWeight:'bold', marginTop:'10px', display:'block'}}>Payment Details</label>
         <div style={{background:'#f9fafb', padding:'10px', borderRadius:'8px', border:'1px solid #eee', marginBottom:'20px'}}>
           <div className="split-row">
@@ -375,7 +469,6 @@ function JobModal({ job, products, onClose }) {
                 <option value="full">Fully Paid</option>
               </select>
             </div>
-            {/* BALANCE DISPLAY */}
             <div className="form-row">
               <label>Balance Remaining</label>
               <div style={{fontWeight:'bold', color: liveBalance > 0 ? 'red' : 'green', padding:'10px', border:'1px solid #ddd', borderRadius:'6px', background:'#fff'}}>
@@ -384,7 +477,6 @@ function JobModal({ job, products, onClose }) {
             </div>
           </div>
 
-          {/* Only show these if NOT Unpaid */}
           {formData.paymentType !== 'unpaid' && (
             <div className="split-row">
               <div className="form-row">
@@ -395,18 +487,11 @@ function JobModal({ job, products, onClose }) {
               </div>
               <div className="form-row">
                 <label>Paying Now</label>
-                <input 
-                  type="number" 
-                  value={formData.advance} 
-                  onChange={e=>setFormData({...formData, advance:e.target.value})}
-                  disabled={formData.paymentType === 'full'} 
-                  style={{background: formData.paymentType === 'full' ? '#eef' : 'white'}}
-                />
+                <input type="number" value={formData.advance} onChange={e=>setFormData({...formData, advance:e.target.value})} disabled={formData.paymentType === 'full'} style={{background: formData.paymentType === 'full' ? '#eef' : 'white'}} />
               </div>
             </div>
           )}
         </div>
-        
         <div className="modal-actions">
           <button onClick={() => saveJobLogic(false)} style={{background:'#6b7280', color:'white', border:'none', padding:'10px 20px', borderRadius:'8px', fontWeight:'600', cursor:'pointer', marginRight:'10px'}}>Save Changes</button>
           <button onClick={() => saveJobLogic(true)} className="btn-confirm">Save & Email</button>
@@ -429,7 +514,7 @@ const generatePDFBase64 = async (job) => {
   if(job.description) { y += 7; doc.setFontSize(9); doc.setTextColor(100); doc.text(`Note: ${job.description}`, 20, y); doc.setFontSize(11); doc.setTextColor(0); y += 3; }
   doc.line(15, y+5, 195, y+5);
   y += 15; doc.text("Sub Total:", 120, y); doc.text(`${Number(job.totalCost).toFixed(2)}`, 160, y);
-  y += 10; doc.text("Paid:", 120, y); doc.text(`- ${Number(job.advance).toFixed(2)}`, 160, y);
+  y += 10; doc.text("Advance Paid:", 120, y); doc.text(`- ${Number(job.advance).toFixed(2)}`, 160, y);
   y += 15; doc.setFont(undefined, 'bold'); doc.setFontSize(14);
   const bal = Number(job.balance) > 0 ? Number(job.balance) : 0;
   if (bal === 0) { doc.setTextColor(0, 150, 0); doc.text("FULLY PAID", 120, y); } else { doc.setTextColor(200, 0, 0); doc.text("BALANCE DUE:", 120, y); doc.text(`${bal.toFixed(2)}`, 165, y); }
