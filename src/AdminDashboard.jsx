@@ -7,25 +7,27 @@ const COMPANY = {
   name: "Studio Click",
   address: "336 Kaduwela Road, Battaramulla, Sri Lanka",
   phone: "077 731 1230",
-  logo: "/LOGO.png" // UPDATED LOGO
+  logo: "/LOGO.png" // Assumes LOGO.png is in the public folder
 };
 
 export default function AdminDashboard() {
   const [allJobs, setAllJobs] = useState([]);
   const [stats, setStats] = useState({ total: 0, today: 0, income: 0 });
 
+  // 1. Fetch Data & Calculate Stats
   useEffect(() => {
     const q = query(collection(db, "jobs"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const jobsData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
       setAllJobs(jobsData);
 
-      // Stats Logic
+      // Real-time Statistics Calculation
       let total = 0, todayCount = 0, income = 0;
       const todayStr = new Date().toDateString();
 
       jobsData.forEach(job => {
         total++;
+        // Check if completed today
         if (job.status === "Completed" && job.finalizedDate === todayStr) {
           todayCount++;
           income += Number(job.totalCost || 0);
@@ -36,10 +38,12 @@ export default function AdminDashboard() {
     return unsubscribe;
   }, []);
 
+  // 2. Handle Job Completion
   const handleFinalize = async (job, sizes, cost) => {
-    if(!confirm("Are you sure you want to complete this job?")) return;
+    if(!sizes || !cost) return alert("Please enter Sizes and Cost.");
+    if(!confirm("Mark this job as completed?")) return;
 
-    // 1. Update Database
+    // A. Update Database
     const jobRef = doc(db, "jobs", job.id);
     await updateDoc(jobRef, {
       sizes,
@@ -48,10 +52,10 @@ export default function AdminDashboard() {
       finalizedDate: new Date().toDateString()
     });
 
-    // 2. Generate PDF Data
+    // B. Generate PDF for Email
     const pdfBase64 = generatePDFBase64(job, sizes, cost);
 
-    // 3. Send Email with Attachment
+    // C. Send Email via Netlify Function
     try {
       await fetch('/.netlify/functions/sendReceipt', {
         method: 'POST',
@@ -59,18 +63,19 @@ export default function AdminDashboard() {
           name: job.name, 
           email: job.email, 
           jobId: job.id, 
-          pdfBase64: pdfBase64 // Sending the file content
+          pdfBase64: pdfBase64 
         })
       });
       alert("Job Completed & Receipt Emailed!");
     } catch (err) {
       console.error(err);
-      alert("Job saved, but Email failed.");
+      alert("Job saved locally, but Email sending failed.");
     }
   };
 
   return (
     <div className="container dashboard-container">
+      {/* BRANDING HEADER */}
       <div className="brand-header center">
         <img src={COMPANY.logo} alt="Logo" className="logo" />
         <div className="brand-info">
@@ -79,12 +84,23 @@ export default function AdminDashboard() {
         </div>
       </div>
 
+      {/* STATISTICS BAR */}
       <div className="stats-grid">
-        <div className="stat-card"><h3>Total Jobs</h3><p>{stats.total}</p></div>
-        <div className="stat-card"><h3>Today's Jobs</h3><p>{stats.today}</p></div>
-        <div className="stat-card highlight"><h3>Today's Income</h3><p>LKR {stats.income}</p></div>
+        <div className="stat-card">
+          <h3>Total Jobs</h3>
+          <p>{stats.total}</p>
+        </div>
+        <div className="stat-card">
+          <h3>Today's Jobs</h3>
+          <p>{stats.today}</p>
+        </div>
+        <div className="stat-card highlight">
+          <h3>Today's Income</h3>
+          <p>LKR {stats.income}</p>
+        </div>
       </div>
 
+      {/* COMPACT JOB LIST */}
       <h2>Job List ({allJobs.length})</h2>
       <div className="job-list">
         {allJobs.map(job => (
@@ -95,60 +111,82 @@ export default function AdminDashboard() {
   );
 }
 
+// --- SUB-COMPONENT: COMPACT JOB ROW ---
 function JobItem({ job, onSave }) {
   const [sizes, setSizes] = useState(job.sizes || '');
   const [cost, setCost] = useState(job.totalCost || '');
   const isCompleted = job.status === "Completed";
 
-  // Manual Print Handler
+  // Manual Print
   const handlePrint = () => {
     const doc = createPDFDoc(job, sizes, cost);
-    doc.autoPrint(); // Open print dialog
+    doc.autoPrint();
     window.open(doc.output('bloburl'), '_blank');
   };
 
   return (
-    <div className={`job-card ${isCompleted ? 'card-completed' : 'card-pending'}`}>
-      <div className="job-header">
-        <div>
-          <h3>{job.name} <span style={{fontSize:'0.8em', color:'#666'}}>({job.id})</span></h3>
-          <span className="job-phone">{job.phone}</span>
+    <div className={`job-row ${isCompleted ? 'row-completed' : 'row-pending'}`}>
+      
+      {/* LEFT: ID & Name */}
+      <div className="row-info">
+        <div className="row-main-text">
+          <span className="job-id-tag">{job.id}</span>
+          <strong>{job.name}</strong>
         </div>
-        <span className={`status-badge ${isCompleted ? 'badge-green' : 'badge-orange'}`}>
-          {job.status}
-        </span>
+        <div className="row-sub-text">
+          {job.phone}
+        </div>
       </div>
-      <p className="job-email">{job.email}</p>
 
-      <div className="job-inputs">
+      {/* MIDDLE: Inputs or Details */}
+      <div className="row-details">
         {isCompleted ? (
-          <>
-            <div className="read-only-field"><label>Sizes</label><strong>{job.sizes}</strong></div>
-            <div className="read-only-field"><label>Cost</label><strong>LKR {job.totalCost}</strong></div>
-          </>
+          <div className="completed-details">
+            <span>Size: <strong>{job.sizes}</strong></span>
+            <span>Cost: <strong>LKR {job.totalCost}</strong></span>
+          </div>
         ) : (
-          <>
-            <input placeholder="Sizes" value={sizes} onChange={e => setSizes(e.target.value)} />
-            <input placeholder="Cost" type="number" value={cost} onChange={e => setCost(e.target.value)} />
-          </>
+          <div className="pending-inputs">
+            <input 
+              className="compact-input" 
+              placeholder="Sizes (e.g. 4x6)" 
+              value={sizes} 
+              onChange={e => setSizes(e.target.value)} 
+            />
+            <input 
+              className="compact-input" 
+              type="number" 
+              placeholder="Cost (LKR)" 
+              value={cost} 
+              onChange={e => setCost(e.target.value)} 
+              style={{width: '100px'}}
+            />
+          </div>
         )}
       </div>
 
-      <div style={{display:'flex', gap:'10px'}}>
+      {/* RIGHT: Actions */}
+      <div className="row-actions">
+        {/* Status Badge */}
+        <span className={`status-badge-compact ${isCompleted ? 'badge-green' : 'badge-orange'}`}>
+          {isCompleted ? "DONE" : "PENDING"}
+        </span>
+
+        {/* Action Buttons */}
         {!isCompleted && (
-          <button onClick={() => onSave(job, sizes, cost)}>Complete & Email</button>
+          <button className="btn-compact btn-save" onClick={() => onSave(job, sizes, cost)}>
+            Save
+          </button>
         )}
-        {/* PRINT BUTTON - Available for everyone, but mostly for completed jobs */}
-        <button onClick={handlePrint} style={{backgroundColor: '#6b7280'}}>
-          Print Receipt
+        <button className="btn-compact btn-print" onClick={handlePrint} title="Print Receipt">
+          🖨️
         </button>
       </div>
     </div>
   );
 }
 
-// --- SHARED PDF GENERATOR LOGIC ---
-// We create a helper so both "Print" and "Email" use the exact same design
+// --- PDF HELPERS (Used for both Print and Email) ---
 const createPDFDoc = (job, sizes, cost) => {
   const doc = new jsPDF();
   
@@ -160,20 +198,21 @@ const createPDFDoc = (job, sizes, cost) => {
   doc.text(`Tel: ${COMPANY.phone}`, 105, 35, null, null, "center");
   doc.line(20, 40, 190, 40);
 
-  // Receipt Info
+  // Body
   doc.setFontSize(16);
   doc.text("OFFICIAL RECEIPT", 105, 55, null, null, "center");
+  
   doc.setFontSize(12);
   doc.text(`Receipt No: #${job.id}`, 20, 70);
   doc.text(`Date: ${new Date().toLocaleDateString()}`, 140, 70);
 
-  // Customer
+  // Customer Box
   doc.setFillColor(245, 245, 245);
   doc.rect(20, 80, 170, 25, "F");
   doc.text(`Customer: ${job.name}`, 25, 90);
   doc.text(`Phone: ${job.phone}`, 25, 98);
 
-  // Details
+  // Line Items
   let y = 125;
   doc.text("Description", 20, y);
   doc.text("Amount", 160, y);
@@ -191,14 +230,12 @@ const createPDFDoc = (job, sizes, cost) => {
   // Footer
   doc.setFont(undefined, 'normal');
   doc.setFontSize(10);
-  doc.text("Thank you!", 105, 180, null, null, "center");
+  doc.text("Thank you for choosing Studio Click!", 105, 180, null, null, "center");
 
   return doc;
 };
 
-// Helper to get Base64 string for Email
 const generatePDFBase64 = (job, sizes, cost) => {
   const doc = createPDFDoc(job, sizes, cost);
-  // btoa converts binary string to base64
   return btoa(doc.output()); 
 };

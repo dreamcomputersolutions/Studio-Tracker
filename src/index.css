@@ -5,10 +5,12 @@
   --white: #ffffff;
   --text-dark: #1f2937;
   --text-gray: #6b7280;
+  --success: #10b981;
+  --warning: #f59e0b;
 }
 
 body {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   background-color: var(--bg-color);
   color: var(--text-dark);
   margin: 0;
@@ -18,90 +20,180 @@ body {
   min-height: 100vh;
 }
 
-/* Containers */
+/* --- CONTAINERS --- */
 .container {
   background: var(--white);
   padding: 2rem;
-  border-radius: 16px;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
   width: 100%;
-  max-width: 500px;
+  max-width: 500px; /* Slim for Customer Form */
   margin: 0 auto;
 }
 
 .dashboard-container {
-  max-width: 850px;
+  max-width: 900px; /* Wider for Admin */
 }
 
-/* Branding */
+/* --- BRANDING HEADER --- */
 .brand-header.center {
   text-align: center;
   margin-bottom: 2rem;
   border-bottom: 1px solid #e5e7eb;
   padding-bottom: 1rem;
 }
-.logo { max-height: 60px; margin-bottom: 10px; }
-h1 { margin: 0; font-size: 1.5rem; }
-p { margin: 5px 0 0; color: var(--text-gray); }
 
-/* Statistics */
+.logo {
+  max-height: 60px;
+  margin-bottom: 10px;
+}
+
+.brand-info h1 { margin: 0; font-size: 1.5rem; }
+.brand-info p { margin: 5px 0 0; color: var(--text-gray); }
+
+/* --- STATISTICS CARDS --- */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 15px;
   margin-bottom: 30px;
 }
+
 .stat-card {
   background: #f9fafb;
   padding: 15px;
-  border-radius: 10px;
+  border-radius: 8px;
   text-align: center;
   border: 1px solid #e5e7eb;
 }
-.stat-card.highlight { background: #e0e7ff; border-color: #c7d2fe; }
-.stat-card h3 { margin: 0; font-size: 0.9rem; color: var(--text-gray); text-transform: uppercase; }
-.stat-card p { margin: 10px 0 0; font-size: 1.8rem; font-weight: bold; color: var(--primary-dark); }
 
-/* Job Cards */
-.job-card {
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 20px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+.stat-card.highlight {
+  background: #e0e7ff;
+  border-color: #c7d2fe;
 }
 
-.job-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 10px;
-}
-.job-header h3 { margin: 0; font-size: 1.25rem; }
-.job-phone { display: block; font-size: 0.9rem; color: var(--text-gray); }
-.job-email { color: var(--text-gray); margin-bottom: 15px; font-size: 0.9rem; }
-
-/* Status Colors */
-.card-pending { border-left: 5px solid #f59e0b; }
-.card-completed { border-left: 5px solid #10b981; background-color: #fcfdfc; opacity: 0.9; }
-
-.status-badge {
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 0.75rem;
-  font-weight: 700;
+.stat-card h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-gray);
   text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
-.badge-orange { background-color: #fffbeb; color: #d97706; border: 1px solid #fcd34d; }
-.badge-green { background-color: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
 
-/* Inputs & Buttons */
-.job-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
-input { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; box-sizing: border-box; }
-button { background-color: var(--primary); color: white; border: none; padding: 12px; border-radius: 8px; font-weight: 600; width: 100%; cursor: pointer; }
-button:hover { background-color: var(--primary-dark); }
+.stat-card p {
+  margin: 8px 0 0;
+  font-size: 1.6rem;
+  font-weight: bold;
+  color: var(--primary-dark);
+}
 
-/* Read Only Mode */
-.read-only-field { background: #f3f4f6; padding: 10px; border-radius: 6px; border: 1px solid #e5e7eb; text-align: center; }
-.read-only-field label { display: block; font-size: 0.75rem; color: #6b7280; }
+/* --- COMPACT JOB LIST LAYOUT --- */
+.job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.job-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: white;
+  padding: 12px 15px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  transition: all 0.2s;
+}
+
+.job-row:hover {
+  box-shadow: 0 4px 8px rgba(0,0,0,0.08);
+}
+
+/* Status Colors (Left Border) */
+.row-pending { border-left: 4px solid var(--warning); }
+.row-completed { border-left: 4px solid var(--success); background-color: #f9fafb; opacity: 0.9; }
+
+/* ROW: Left Section (Customer Info) */
+.row-info {
+  flex: 1.5;
+  min-width: 200px;
+}
+
+.row-main-text {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-dark);
+}
+
+.job-id-tag {
+  font-family: 'Courier New', monospace;
+  background: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  color: var(--text-gray);
+  border: 1px solid #e5e7eb;
+}
+
+.row-sub-text {
+  font-size: 0.85rem;
+  color: var(--text-gray);
+  margin-top: 4px;
+}
+
+/* ROW: Middle Section (Inputs/Details) */
+.row-details {
+  flex: 2;
+  padding: 0 20px;
+}
+
+.completed-details {
+  display: flex;
+  gap: 20px;
+  font-size: 0.9rem;
+  color: var(--text-dark);
+}
+
+.pending-inputs {
+  display: flex;
+  gap: 10px;
+}
+
+.compact-input {
+  padding: 8px 10px;
+  font-size: 0.9rem;
+  margin: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  height: 38px; /* Fixed height for alignment */
+  width: 100%;
+}
+
+.compact-input:focus {
+  outline: 2px solid var(--primary);
+  border-color: transparent;
+}
+
+/* ROW: Right Section (Buttons) */
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-badge-compact {
+  font-size: 0.7rem;
+  font-weight: 800;
+  padding: 4px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.badge-orange { background: #fffbeb; color: #b45309; }
+.badge-green { background: #d1fae5; color: #065f46; }
+
+/* Compact Buttons */
+.btn-compact {
+  height: 38px;
+  padding: 0 16px;
